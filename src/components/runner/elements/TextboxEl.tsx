@@ -1,15 +1,21 @@
+"use client";
+import { useMemo } from "react";
 import type { TextboxConfig } from "@/lib/types";
 
+// Strip dangerous patterns from Tiptap-generated HTML.
+// Content is surveyor-authored so risk is low, but we still sanitize
+// event handlers and script tags defensively.
+function sanitize(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/\s+on\w+="[^"]*"/gi, "")
+    .replace(/\s+on\w+='[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
+}
+
 export default function TextboxEl({ config }: { config: TextboxConfig }) {
-  // Render markdown as plain paragraphs for now; bold/italic via simple transforms
-  const html = config.content
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/\n/g, "<br/>");
+  const clean = useMemo(() => sanitize(config.content ?? ""), [config.content]);
   return (
-    <div
-      className="prose prose-zinc max-w-none text-zinc-700 leading-relaxed"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className="prose-content" dangerouslySetInnerHTML={{ __html: clean }} />
   );
 }

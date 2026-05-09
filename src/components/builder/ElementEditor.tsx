@@ -2,6 +2,7 @@
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { TiptapEditor } from "@/components/ui/tiptap-editor";
 import type { BuilderElement, VideoLikertConfig, LikertConfig } from "@/lib/types";
 
 type Props = { element: BuilderElement; onChange: (el: BuilderElement) => void };
@@ -25,8 +26,12 @@ export default function ElementEditor({ element, onChange }: Props) {
     case "textbox":
       return (
         <div className="space-y-1">
-          <Label>Content (Markdown)</Label>
-          <Textarea rows={4} value={String(cfg.content ?? "")} onChange={(e) => patch({ content: e.target.value })} />
+          <Label>Content</Label>
+          <TiptapEditor
+            content={String(cfg.content ?? "")}
+            onChange={(html) => patch({ content: html })}
+            placeholder="Type survey instructions here…"
+          />
         </div>
       );
 

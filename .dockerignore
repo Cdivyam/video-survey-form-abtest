@@ -1,0 +1,9 @@
+.git
+.next
+node_modules
+dev.db
+dev.db-*
+public/uploads
+dev_docs
+*.md
+.env*

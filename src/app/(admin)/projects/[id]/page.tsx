@@ -74,6 +74,22 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     setGenerating(false);
   }
 
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for HTTP (non-secure) contexts — e.g. LAN access via IP
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy"); // deprecated but only option on plain HTTP
+      document.body.removeChild(el);
+    }
+    toast.success("Link copied");
+  }
+
   async function confirmDeleteSurvey() {
     if (!surveyToDelete) return;
     setDeleting(true);
@@ -213,7 +229,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                       {s.status === "ready" && (
                         <div className="flex items-center gap-2">
                           <code className="text-xs bg-zinc-100 px-2 py-1 rounded">{url}</code>
-                          <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(url); toast.success("Link copied"); }}>
+                          <Button variant="ghost" size="sm" onClick={() => copyToClipboard(url)}>
                             Copy
                           </Button>
                         </div>

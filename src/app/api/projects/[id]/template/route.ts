@@ -43,7 +43,39 @@ export async function PUT(
     });
   }
 
-  // Replace all pages and elements
+  // If existing surveys reference this template, disable them and null out
+  // their response.elementId so the FK constraint allows element deletion.
+  const existingSurveys = await prisma.survey.findMany({
+    where: { templateId: template.id },
+    select: { id: true },
+  });
+
+  if (existingSurveys.length > 0) {
+    const surveyIds = existingSurveys.map((s: { id: string }) => s.id);
+
+    // Find all sessions for these surveys
+    const sessions = await prisma.respondentSession.findMany({
+      where: { surveyId: { in: surveyIds } },
+      select: { id: true },
+    });
+    const sessionIds = sessions.map((s: { id: string }) => s.id);
+
+    // Null out elementId on responses so we can safely delete the elements
+    if (sessionIds.length > 0) {
+      await prisma.response.updateMany({
+        where: { sessionId: { in: sessionIds } },
+        data: { elementId: null },
+      });
+    }
+
+    // Disable all existing surveys
+    await prisma.survey.updateMany({
+      where: { id: { in: surveyIds } },
+      data: { status: "disabled" },
+    });
+  }
+
+  // Now safely replace all pages and elements
   await prisma.templateElement.deleteMany({
     where: { page: { templateId: template.id } },
   });
@@ -66,5 +98,5 @@ export async function PUT(
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, surveysDisabled: existingSurveys.length });
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, use, useCallback } from "react";
+import { useEffect, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -11,7 +11,7 @@ import VideoLikertEl from "@/components/runner/elements/VideoLikertEl";
 import VideoPreferenceEl from "@/components/runner/elements/VideoPreferenceEl";
 import type {
   RunnerSession, BuilderPage, BuilderElement,
-  RunnerVideoSet, SlotLabel,
+  RunnerVideoSet,
   ConsentConfig, VideoLikertConfig, VideoPreferenceConfig,
   HeadingConfig, TextboxConfig, ShortAnswerConfig,
   SingleChoiceConfig, MultiChoiceConfig, LikertConfig,
@@ -41,8 +41,10 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ slug }),
-    }).then((r) => r.json()).then((d) => {
+    }).then(async (r) => {
+      const d = await r.json();
       if (d.token) setToken(d.token);
+      else if (r.status === 410) setError("This survey has been disabled by the owner. Please contact the form owner.");
       else setError("This survey is not available.");
     }).catch(() => setError("Failed to load survey."));
   }, [slug]);
@@ -99,10 +101,10 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         if (!val) return false;
       } else if (type === "video_likert" && videoSet) {
         for (const slot of videoSet.slots) {
-          if (!responses[`${el.id}::${slot}`]) return false;
+          if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`]) return false;
         }
       } else if (type === "video_preference" && videoSet) {
-        if (!responses[`${el.id}::pref`]) return false;
+        if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`]) return false;
       } else if (type === "short_answer" || type === "single_choice") {
         // optional — skip validation
       }
@@ -124,11 +126,11 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
 
       if (el.elementType === "video_likert" && videoSet) {
         for (const slot of videoSet.slots) {
-          const val = responses[`${el.id}::${slot}`];
+          const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`];
           if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: slot, value: val });
         }
       } else if (el.elementType === "video_preference" && videoSet) {
-        const val = responses[`${el.id}::pref`];
+        const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`];
         if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: val, value: val });
       } else {
         const val = responses[el.id];
@@ -243,8 +245,8 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
             elementId={el.id}
             slots={videoSet.slots}
             surveyVideoSetId={videoSet.surveyVideoSetId}
-            values={Object.fromEntries(videoSet.slots.map((s) => [s, responses[`${el.id}::${s}`] ?? ""]))}
-            onChange={(slot, val) => setResponse(`${el.id}::${slot}`, val)}
+            values={Object.fromEntries(videoSet.slots.map((s) => [s, responses[`${videoSet.surveyVideoSetId}::${el.id}::${s}`] ?? ""]))}
+            onChange={(slot, val) => setResponse(`${videoSet.surveyVideoSetId}::${el.id}::${slot}`, val)}
           />
         ) : null;
       case "video_preference":
@@ -252,8 +254,8 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
           <VideoPreferenceEl
             config={el.config as VideoPreferenceConfig}
             slots={videoSet.slots}
-            value={responses[`${el.id}::pref`] ?? ""}
-            onChange={(val) => setResponse(`${el.id}::pref`, val)}
+            value={responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`] ?? ""}
+            onChange={(val) => setResponse(`${videoSet.surveyVideoSetId}::${el.id}::pref`, val)}
           />
         ) : null;
       default:

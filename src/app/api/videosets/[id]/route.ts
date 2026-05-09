@@ -14,6 +14,7 @@ export async function DELETE(
   if (!set) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await Promise.all(set.videos.map((v: { fileUrl: string }) => deleteFile(v.fileUrl)));
-  await prisma.videoSet.delete({ where: { id } });
+  // deleteMany is idempotent — won't throw if already deleted by a concurrent request
+  await prisma.videoSet.deleteMany({ where: { id } });
   return new NextResponse(null, { status: 204 });
 }

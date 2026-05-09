@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 type Video = { id: string; modelName: string; fileUrl: string; orderIndex: number };
@@ -30,6 +32,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [project, setProject] = useState<Project | null>(null);
   const [generating, setGenerating] = useState(false);
   const [pollingId, setPollingId] = useState<string | null>(null);
+
+  // Delete confirmation dialog
+  const [deleteTarget, setDeleteTarget] = useState<Survey | null>(null);
+  const [deleteInput, setDeleteInput] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     const res = await fetch(`/api/projects/${id}`);
@@ -70,8 +77,17 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     setGenerating(false);
   }
 
-  async function deleteSurvey(surveyId: string) {
-    await fetch(`/api/surveys/${surveyId}`, { method: "DELETE" });
+  function openDeleteDialog(s: Survey) {
+    setDeleteTarget(s);
+    setDeleteInput("");
+  }
+
+  async function confirmDeleteSurvey() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    await fetch(`/api/surveys/${deleteTarget.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setDeleteTarget(null);
     load();
   }
 
@@ -139,6 +155,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           ) : (
             <p className="text-zinc-400 text-sm">No template yet.</p>
           )}
+          {template && project.surveys.some((s) => s.status === "ready" || s.status === "generating") && (
+            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Saving edits to this template will <strong>disable all existing surveys</strong>. Responses already collected are preserved.
+            </p>
+          )}
           <Button onClick={() => router.push(`/projects/${id}/template`)}>
             {template ? "Edit Template" : "Create Template"}
           </Button>
@@ -167,7 +188,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     <CardContent className="py-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <Badge variant={s.status === "ready" ? "default" : s.status === "generating" ? "secondary" : "outline"}>
+                          <Badge variant={
+                            s.status === "ready" ? "default" :
+                            s.status === "generating" ? "secondary" :
+                            s.status === "disabled" ? "destructive" : "outline"
+                          }>
                             {s.status}
                           </Badge>
                           <span className="text-sm text-zinc-500">{new Date(s.createdAt).toLocaleString()}</span>
@@ -180,7 +205,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                             </a>
                           )}
                           <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
-                            onClick={() => deleteSurvey(s.id)}>Delete</Button>
+                            onClick={() => openDeleteDialog(s)}>Delete</Button>
                         </div>
                       </div>
                       {s.status === "generating" && (
@@ -205,6 +230,49 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           )}
         </TabsContent>
       </Tabs>
+
+      {/* ── Delete Survey Dialog ── */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete survey</DialogTitle>
+            <DialogDescription>
+              {deleteTarget && deleteTarget._count.sessions > 0 ? (
+                <>
+                  This survey has <strong>{deleteTarget._count.sessions} response{deleteTarget._count.sessions !== 1 ? "s" : ""}</strong>. This action cannot be undone.
+                  <br /><br />
+                  Type <code className="bg-zinc-100 px-1 rounded font-mono">{deleteTarget.slug}</code> to confirm.
+                </>
+              ) : (
+                "Are you sure you want to delete this survey? This action cannot be undone."
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleteTarget && deleteTarget._count.sessions > 0 && (
+            <Input
+              placeholder={deleteTarget.slug}
+              value={deleteInput}
+              onChange={(e) => setDeleteInput(e.target.value)}
+              className="font-mono"
+            />
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={
+                deleting ||
+                (!!deleteTarget && deleteTarget._count.sessions > 0 && deleteInput !== deleteTarget.slug)
+              }
+              onClick={confirmDeleteSurvey}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

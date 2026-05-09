@@ -5,7 +5,11 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: Request) {
   const { slug } = await req.json();
   const survey = await prisma.survey.findUnique({ where: { slug } });
-  if (!survey || survey.status !== "ready") {
+  if (!survey) return NextResponse.json({ error: "Survey not found" }, { status: 404 });
+  if (survey.status === "disabled") {
+    return NextResponse.json({ error: "Survey disabled" }, { status: 410 });
+  }
+  if (survey.status !== "ready") {
     return NextResponse.json({ error: "Survey not available" }, { status: 404 });
   }
   const session = await prisma.respondentSession.create({ data: { surveyId: survey.id } });

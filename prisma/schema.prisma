@@ -88,7 +88,7 @@ model Survey {
   templateId String
   projectId  String
   slug       String       @unique
-  status     String       @default("generating") // generating | ready | closed
+  status     String       @default("generating") // generating | ready | closed | disabled
   createdAt  DateTime     @default(now())
 
   template        SurveyTemplate      @relation(fields: [templateId], references: [id])
@@ -128,11 +128,11 @@ model Response {
   id               String  @id @default(cuid())
   sessionId        String
   surveyVideoSetId String? // null for non-video questions
-  elementId        String  // TemplateElement.id
+  elementId        String? // nullable — set to null when template is edited after responses collected
   slotLabel        String? // "A"|"B"|"C"|"D"|"E" — video_likert and video_preference only
   value            String  // stringified score or free text
 
   session        RespondentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   surveyVideoSet SurveyVideoSet?   @relation(fields: [surveyVideoSetId], references: [id])
-  element        TemplateElement   @relation(fields: [elementId], references: [id])
+  element        TemplateElement?  @relation(fields: [elementId], references: [id])
 }

@@ -256,7 +256,6 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             This will permanently delete <strong>{videoSetToDelete?.name}</strong> and all its videos. This action cannot be undone.
           </>
         }
-        confirmText={videoSetToDelete?.name}
         onConfirm={confirmDeleteVideoSet}
         loading={deleting}
       />

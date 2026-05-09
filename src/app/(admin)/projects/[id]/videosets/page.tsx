@@ -173,7 +173,6 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
             This will permanently delete <strong>{setToDelete?.name}</strong> and all {setToDelete?.videos.length} video{setToDelete?.videos.length !== 1 ? "s" : ""} in it. This action cannot be undone.
           </>
         }
-        confirmText={setToDelete?.name}
         onConfirm={confirmDeleteSet}
         loading={deleting}
       />

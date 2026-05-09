@@ -34,11 +34,12 @@ model VideoSet {
 }
 
 model Video {
-  id         String @id @default(cuid())
-  videoSetId String
-  modelName  String
-  fileUrl    String
-  orderIndex Int
+  id               String  @id @default(cuid())
+  videoSetId       String
+  modelName        String
+  fileUrl          String
+  originalFilename String? // original client filename at upload time
+  orderIndex       Int
 
   videoSet VideoSet @relation(fields: [videoSetId], references: [id], onDelete: Cascade)
 }

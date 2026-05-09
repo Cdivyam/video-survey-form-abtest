@@ -35,6 +35,7 @@ export async function POST(
       videoSetId: id,
       modelName: modelName.trim(),
       fileUrl,
+      originalFilename: file.name,
       orderIndex: set.videos.length,
     },
   });

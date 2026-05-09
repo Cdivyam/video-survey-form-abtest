@@ -117,7 +117,7 @@ async function renderComposites(
 
     const filename = `${svsRow.id}.mp4`;
     const outputPath = path.join(process.cwd(), "public", "uploads", "composites", filename);
-    const compositeUrl = `/uploads/composites/${filename}`;
+    const compositeUrl = `/api/files/composites/${filename}`;
 
     await prisma.surveyVideoSet.update({
       where: { id: svsRow.id },

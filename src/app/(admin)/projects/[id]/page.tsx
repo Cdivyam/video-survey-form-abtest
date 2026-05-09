@@ -8,8 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 
 type Video = { id: string; modelName: string; fileUrl: string; orderIndex: number };
@@ -33,9 +32,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [generating, setGenerating] = useState(false);
   const [pollingId, setPollingId] = useState<string | null>(null);
 
-  // Delete confirmation dialog
-  const [deleteTarget, setDeleteTarget] = useState<Survey | null>(null);
-  const [deleteInput, setDeleteInput] = useState("");
+  const [surveyToDelete, setSurveyToDelete] = useState<Survey | null>(null);
+  const [videoSetToDelete, setVideoSetToDelete] = useState<VideoSet | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   async function load() {
@@ -46,12 +44,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   useEffect(() => { load(); }, [id]);
 
-  // Poll status for any generating surveys
   useEffect(() => {
     if (!project) return;
-    const generating = project.surveys.find((s) => s.status === "generating");
-    if (!generating) { setPollingId(null); return; }
-    setPollingId(generating.id);
+    const gen = project.surveys.find((s) => s.status === "generating");
+    if (!gen) { setPollingId(null); return; }
+    setPollingId(gen.id);
   }, [project]);
 
   useEffect(() => {
@@ -77,22 +74,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     setGenerating(false);
   }
 
-  function openDeleteDialog(s: Survey) {
-    setDeleteTarget(s);
-    setDeleteInput("");
-  }
-
   async function confirmDeleteSurvey() {
-    if (!deleteTarget) return;
+    if (!surveyToDelete) return;
     setDeleting(true);
-    await fetch(`/api/surveys/${deleteTarget.id}`, { method: "DELETE" });
+    await fetch(`/api/surveys/${surveyToDelete.id}`, { method: "DELETE" });
     setDeleting(false);
-    setDeleteTarget(null);
+    setSurveyToDelete(null);
     load();
   }
 
-  async function deleteVideoSet(vsId: string) {
-    await fetch(`/api/videosets/${vsId}`, { method: "DELETE" });
+  async function confirmDeleteVideoSet() {
+    if (!videoSetToDelete) return;
+    setDeleting(true);
+    await fetch(`/api/videosets/${videoSetToDelete.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setVideoSetToDelete(null);
     load();
   }
 
@@ -133,7 +129,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                       <p className="text-sm text-zinc-500">{vs.videos.length} video{vs.videos.length !== 1 ? "s" : ""}: {vs.videos.map((v) => v.modelName).join(", ")}</p>
                     </div>
                     <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
-                      onClick={() => deleteVideoSet(vs.id)}>Delete</Button>
+                      onClick={() => setVideoSetToDelete(vs)}>Delete</Button>
                   </CardContent>
                 </Card>
               ))}
@@ -205,7 +201,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                             </a>
                           )}
                           <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
-                            onClick={() => openDeleteDialog(s)}>Delete</Button>
+                            onClick={() => setSurveyToDelete(s)}>Delete</Button>
                         </div>
                       </div>
                       {s.status === "generating" && (
@@ -231,48 +227,39 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </TabsContent>
       </Tabs>
 
-      {/* ── Delete Survey Dialog ── */}
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete survey</DialogTitle>
-            <DialogDescription>
-              {deleteTarget && deleteTarget._count.sessions > 0 ? (
-                <>
-                  This survey has <strong>{deleteTarget._count.sessions} response{deleteTarget._count.sessions !== 1 ? "s" : ""}</strong>. This action cannot be undone.
-                  <br /><br />
-                  Type <code className="bg-zinc-100 px-1 rounded font-mono">{deleteTarget.slug}</code> to confirm.
-                </>
-              ) : (
-                "Are you sure you want to delete this survey? This action cannot be undone."
-              )}
-            </DialogDescription>
-          </DialogHeader>
+      {/* ── Survey delete ── */}
+      <ConfirmDialog
+        open={!!surveyToDelete}
+        onOpenChange={(open) => { if (!open) setSurveyToDelete(null); }}
+        title="Delete survey"
+        description={
+          surveyToDelete && surveyToDelete._count.sessions > 0 ? (
+            <>
+              This survey has <strong>{surveyToDelete._count.sessions} response{surveyToDelete._count.sessions !== 1 ? "s" : ""}</strong>. This action cannot be undone.
+            </>
+          ) : (
+            "Are you sure you want to delete this survey? This action cannot be undone."
+          )
+        }
+        confirmText={surveyToDelete && surveyToDelete._count.sessions > 0 ? surveyToDelete.slug : undefined}
+        onConfirm={confirmDeleteSurvey}
+        loading={deleting}
+      />
 
-          {deleteTarget && deleteTarget._count.sessions > 0 && (
-            <Input
-              placeholder={deleteTarget.slug}
-              value={deleteInput}
-              onChange={(e) => setDeleteInput(e.target.value)}
-              className="font-mono"
-            />
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              disabled={
-                deleting ||
-                (!!deleteTarget && deleteTarget._count.sessions > 0 && deleteInput !== deleteTarget.slug)
-              }
-              onClick={confirmDeleteSurvey}
-            >
-              {deleting ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ── VideoSet delete ── */}
+      <ConfirmDialog
+        open={!!videoSetToDelete}
+        onOpenChange={(open) => { if (!open) setVideoSetToDelete(null); }}
+        title="Delete video set"
+        description={
+          <>
+            This will permanently delete <strong>{videoSetToDelete?.name}</strong> and all its videos. This action cannot be undone.
+          </>
+        }
+        confirmText={videoSetToDelete?.name}
+        onConfirm={confirmDeleteVideoSet}
+        loading={deleting}
+      />
     </div>
   );
 }

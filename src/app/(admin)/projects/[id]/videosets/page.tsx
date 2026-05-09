@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 
 type Video = { id: string; modelName: string; fileUrl: string };
@@ -18,10 +19,14 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
   const [sets, setSets] = useState<VideoSet[]>([]);
   const [newSetName, setNewSetName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [uploading, setUploading] = useState<string | null>(null); // videoSetId being uploaded to
+  const [uploading, setUploading] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingSetId = useRef<string | null>(null);
   const pendingModelName = useRef<string>("");
+
+  const [setToDelete, setSetToDelete] = useState<VideoSet | null>(null);
+  const [videoToDelete, setVideoToDelete] = useState<Video & { setName: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     const res = await fetch(`/api/projects/${id}/videosets`);
@@ -43,13 +48,21 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     setCreating(false);
   }
 
-  async function deleteSet(vsId: string) {
-    await fetch(`/api/videosets/${vsId}`, { method: "DELETE" });
+  async function confirmDeleteSet() {
+    if (!setToDelete) return;
+    setDeleting(true);
+    await fetch(`/api/videosets/${setToDelete.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setSetToDelete(null);
     load();
   }
 
-  async function deleteVideo(videoId: string) {
-    await fetch(`/api/videos/${videoId}`, { method: "DELETE" });
+  async function confirmDeleteVideo() {
+    if (!videoToDelete) return;
+    setDeleting(true);
+    await fetch(`/api/videos/${videoToDelete.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setVideoToDelete(null);
     load();
   }
 
@@ -111,7 +124,7 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">{vs.name}</CardTitle>
                 <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
-                  onClick={() => deleteSet(vs.id)}>Delete set</Button>
+                  onClick={() => setSetToDelete(vs)}>Delete set</Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -124,8 +137,10 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
                         <Badge variant="outline" className="text-xs">{SLOT_LABELS[i]}</Badge>
                         <p className="text-xs text-zinc-600 mt-0.5">{v.modelName}</p>
                       </div>
-                      <button onClick={() => deleteVideo(v.id)}
-                        className="text-red-400 hover:text-red-600 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setVideoToDelete({ ...v, setName: vs.name })}
+                        className="text-red-400 hover:text-red-600 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
                         ✕
                       </button>
                     </div>
@@ -147,6 +162,36 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
         ))}
         {sets.length === 0 && <p className="text-zinc-400 text-sm">No video sets yet. Create one above.</p>}
       </div>
+
+      {/* ── Delete set ── */}
+      <ConfirmDialog
+        open={!!setToDelete}
+        onOpenChange={(open) => { if (!open) setSetToDelete(null); }}
+        title="Delete video set"
+        description={
+          <>
+            This will permanently delete <strong>{setToDelete?.name}</strong> and all {setToDelete?.videos.length} video{setToDelete?.videos.length !== 1 ? "s" : ""} in it. This action cannot be undone.
+          </>
+        }
+        confirmText={setToDelete?.name}
+        onConfirm={confirmDeleteSet}
+        loading={deleting}
+      />
+
+      {/* ── Delete individual video ── */}
+      <ConfirmDialog
+        open={!!videoToDelete}
+        onOpenChange={(open) => { if (!open) setVideoToDelete(null); }}
+        title="Remove video"
+        description={
+          <>
+            Remove <strong>{videoToDelete?.modelName}</strong> from <strong>{videoToDelete?.setName}</strong>? This action cannot be undone.
+          </>
+        }
+        onConfirm={confirmDeleteVideo}
+        confirmLabel="Remove"
+        loading={deleting}
+      />
     </div>
   );
 }

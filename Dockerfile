@@ -1,7 +1,9 @@
 FROM node:22-slim
 
-# FFmpeg for composite video rendering
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# FFmpeg for composite video rendering + DejaVu fonts for drawtext labels
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg \
+      fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

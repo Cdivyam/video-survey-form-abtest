@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Project ─────────────────────────────────────────────────────────────────
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  videoSets       VideoSet[]
+  surveyTemplates SurveyTemplate[]
+  surveys         Survey[]
+}
+
+// ─── Video Bank ───────────────────────────────────────────────────────────────
+
+model VideoSet {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  createdAt DateTime @default(now())
+
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  videos          Video[]
+  surveyVideoSets SurveyVideoSet[]
+}
+
+model Video {
+  id         String @id @default(cuid())
+  videoSetId String
+  modelName  String
+  fileUrl    String
+  orderIndex Int
+
+  videoSet VideoSet @relation(fields: [videoSetId], references: [id], onDelete: Cascade)
+}
+
+// ─── Survey Template (Page Builder Output) ────────────────────────────────────
+
+model SurveyTemplate {
+  id            String   @id @default(cuid())
+  projectId     String
+  name          String
+  setsPerSurvey Int      @default(0) // 0 = non-video survey
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project  Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pages    TemplatePage[]
+  surveys  Survey[]
+}
+
+model TemplatePage {
+  id         String      @id @default(cuid())
+  templateId String
+  section    String      // "before" | "dynamic" | "after"
+  orderIndex Int
+
+  template SurveyTemplate    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  elements TemplateElement[]
+}
+
+model TemplateElement {
+  id          String @id @default(cuid())
+  pageId      String
+  elementType String
+  // heading | textbox | consent | demographics | single_choice | multi_choice
+  // short_answer | likert | videoset_block | video_likert | video_preference
+  config      String // JSON stored as text (Prisma Json maps to text in SQLite)
+  orderIndex  Int
+
+  page      TemplatePage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  responses Response[]
+}
+
+// ─── Generated Survey ─────────────────────────────────────────────────────────
+
+model Survey {
+  id         String       @id @default(cuid())
+  templateId String
+  projectId  String
+  slug       String       @unique
+  status     String       @default("generating") // generating | ready | closed
+  createdAt  DateTime     @default(now())
+
+  template        SurveyTemplate      @relation(fields: [templateId], references: [id])
+  project         Project             @relation(fields: [projectId], references: [id])
+  surveyVideoSets SurveyVideoSet[]
+  sessions        RespondentSession[]
+}
+
+model SurveyVideoSet {
+  id              String  @id @default(cuid())
+  surveyId        String
+  videoSetId      String
+  positionIndex   Int     // ordering within the survey dynamic section (0-based)
+  slotMap         String  // JSON: { "A": videoId, "B": videoId, ... }
+  compositeUrl    String?
+  compositeStatus String  @default("pending") // pending | rendering | ready | failed
+
+  survey    Survey    @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  videoSet  VideoSet  @relation(fields: [videoSetId], references: [id])
+  responses Response[]
+}
+
+// ─── Respondent ───────────────────────────────────────────────────────────────
+
+model RespondentSession {
+  id          String    @id @default(cuid())
+  surveyId    String
+  token       String    @unique @default(cuid())
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  survey    Survey     @relation(fields: [surveyId], references: [id])
+  responses Response[]
+}
+
+model Response {
+  id               String  @id @default(cuid())
+  sessionId        String
+  surveyVideoSetId String? // null for non-video questions
+  elementId        String  // TemplateElement.id
+  slotLabel        String? // "A"|"B"|"C"|"D"|"E" — video_likert and video_preference only
+  value            String  // stringified score or free text
+
+  session        RespondentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  surveyVideoSet SurveyVideoSet?   @relation(fields: [surveyVideoSetId], references: [id])
+  element        TemplateElement   @relation(fields: [elementId], references: [id])
+}

@@ -1,39 +1,10 @@
 import ffmpeg from "fluent-ffmpeg";
 import path from "path";
 import fs from "fs/promises";
-import os from "os";
 
-function getFontPath(): string | null {
-  const candidates =
-    os.platform() === "win32"
-      ? [
-          "C:\\Windows\\Fonts\\arial.ttf",
-          "C:\\Windows\\Fonts\\arialbd.ttf",
-          "C:\\Windows\\Fonts\\calibri.ttf",
-          "C:\\Windows\\Fonts\\segoeui.ttf",
-        ]
-      : [
-          // DejaVu — installed via fonts-dejavu-core in Dockerfile
-          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-          // Liberation (common on many distros)
-          "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-          "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-          // FreeFonts fallback
-          "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-          "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-        ];
-
-  const fsSync = require("fs");
-  for (const f of candidates) {
-    try {
-      fsSync.accessSync(f);
-      return f;
-    } catch {
-      continue;
-    }
-  }
-  return null;
+// Bundled font — always at a known path regardless of OS or distro
+function getFontPath(): string {
+  return path.join(process.cwd(), "public", "fonts", "arial.ttf");
 }
 
 function escapeFfmpegPath(p: string): string {
@@ -81,15 +52,13 @@ export async function createComposite(
       .join("|")}[stacked]`;
 
     // Burn slot labels
+    const fp = escapeFfmpegPath(fontPath);
     const labelFilters = slotLabels.map((label, i) => {
       const x = i * 640 + 8;
-      const boxFilter = `drawbox=x=${x}:y=8:w=52:h=58:color=black@0.6:t=fill`;
-      if (fontPath) {
-        const fp = escapeFfmpegPath(fontPath);
-        const textFilter = `drawtext=fontfile='${fp}':text='${label}':fontsize=42:fontcolor=white:x=${x + 8}:y=12`;
-        return `${boxFilter},${textFilter}`;
-      }
-      return boxFilter;
+      return [
+        `drawbox=x=${x}:y=8:w=52:h=58:color=black@0.6:t=fill`,
+        `drawtext=fontfile='${fp}':text='${label}':fontsize=42:fontcolor=white:x=${x + 8}:y=12`,
+      ].join(",");
     });
     const drawFilters = labelFilters.join(",");
 

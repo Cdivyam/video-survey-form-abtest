@@ -51,5 +51,8 @@ dev.db-shm
 # uploaded files (local storage, not for version control)
 /public/uploads/
 
+# docker bind-mount data directory (database)
+/data/
+
 # local dev docs (bug reports, implementation notes)
 /dev_docs/

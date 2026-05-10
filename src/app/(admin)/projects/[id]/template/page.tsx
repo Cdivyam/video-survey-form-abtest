@@ -184,7 +184,21 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           </CardContent>
         </Card>
 
-        {/* Canvas */}
+        {/* Properties panel — centre, wide */}
+        <Card className="overflow-auto">
+          <CardHeader className="py-3 px-4 border-b">
+            <CardTitle className="text-sm text-zinc-500">Properties</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 py-3">
+            {selectedElement ? (
+              <ElementEditor element={selectedElement} onChange={updateElement} />
+            ) : (
+              <p className="text-zinc-400 text-sm">Select an element from the canvas to edit its properties</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Canvas — right, narrow */}
         <Card className="overflow-auto">
           <CardHeader className="py-3 px-4 border-b">
             <CardTitle className="text-sm text-zinc-500">{SECTION_LABELS[activeSection]}</CardTitle>
@@ -204,20 +218,6 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                 ))}
               </SortableContext>
             </DndContext>
-          </CardContent>
-        </Card>
-
-        {/* Properties panel */}
-        <Card className="overflow-auto">
-          <CardHeader className="py-3 px-4 border-b">
-            <CardTitle className="text-sm text-zinc-500">Properties</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 py-3">
-            {selectedElement ? (
-              <ElementEditor element={selectedElement} onChange={updateElement} />
-            ) : (
-              <p className="text-zinc-400 text-sm">Select an element to edit its properties</p>
-            )}
           </CardContent>
         </Card>
       </div>

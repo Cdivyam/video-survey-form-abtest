@@ -11,6 +11,8 @@ services:
       BASE_URL: http://localhost:3000
       # Random string for signing session tokens — change before deploying
       SESSION_SECRET: "change-this-to-a-random-string"
+      # Set to "true" only when serving over HTTPS — leave "false" for plain HTTP
+      COOKIE_SECURE: "false"
     volumes:
       # Database + admin password file — bind mount to ./data/
       # Create admin password: echo "yourpassword" > ./data/admin.password

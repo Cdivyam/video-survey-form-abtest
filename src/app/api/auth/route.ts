@@ -26,9 +26,12 @@ export async function POST(req: Request) {
 
   const token = await createSessionToken();
   const res = NextResponse.json({ ok: true });
+  // COOKIE_SECURE=true only when serving over HTTPS.
+  // Plain HTTP deployments (LAN, local) must leave it unset or set to "false".
+  const secureCookie = process.env.COOKIE_SECURE === "true";
   res.cookies.set(COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookie,
     sameSite: "strict",
     maxAge: COOKIE_MAX_AGE,
     path: "/",

@@ -39,6 +39,7 @@ function Sep() {
 
 export function TiptapEditor({ content, onChange, placeholder }: Props) {
   const editor = useEditor({
+    immediatelyRender: false, // required in Tiptap v3 to avoid SSR hydration mismatch
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Placeholder.configure({ placeholder: placeholder ?? "Type content here…" }),

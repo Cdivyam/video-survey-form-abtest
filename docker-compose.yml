@@ -9,9 +9,12 @@ services:
       DATABASE_URL: file:/data/db.sqlite
       # Change this to your server's address or domain
       BASE_URL: http://localhost:3000
+      # Random string for signing session tokens — change before deploying
+      SESSION_SECRET: "change-this-to-a-random-string"
     volumes:
-      # Database — bind mount to ./data/ (not under public/, keeps it off the web)
+      # Database + admin password file — bind mount to ./data/
+      # Create admin password: echo "yourpassword" > ./data/admin.password
       - ./data:/data
-      # Uploads — bind mount to ./public/uploads/ (already gitignored, served as static files)
+      # Uploads — bind mount to ./public/uploads/
       - ./public/uploads:/app/public/uploads
     restart: unless-stopped

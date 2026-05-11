@@ -27,8 +27,9 @@ export function defaultConfig(type: ElementType): ElementConfig {
     case "textbox": return { content: "Enter instructions here..." };
     case "consent": return { text: "I agree to participate in this survey.", required: true };
     case "demographics": return { fields: [
-      { id: "age", label: "Age range", type: "select", options: ["18–24","25–34","35–44","45–54","55+"], required: true },
-      { id: "gender", label: "Gender", type: "radio", options: ["Male","Female","Non-binary","Prefer not to say"], required: false },
+      { id: "name",   label: "Full name",  type: "text",   required: true },
+      { id: "age",    label: "Age range",  type: "select", options: ["18–24","25–34","35–44","45–54","55+"], required: true },
+      { id: "gender", label: "Gender",     type: "radio",  options: ["Male","Female","Non-binary","Prefer not to say"], required: false },
     ]};
     case "single_choice": return { prompt: "Select one option:", options: ["Option A", "Option B", "Option C"] };
     case "multi_choice": return { prompt: "Select all that apply:", options: ["Option A", "Option B", "Option C"] };

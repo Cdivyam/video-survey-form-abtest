@@ -128,6 +128,7 @@ export type RunnerSession = {
   survey: {
     id: string;
     template: {
+      name: string;
       pages: BuilderPage[];
       setsPerSurvey: number;
     };

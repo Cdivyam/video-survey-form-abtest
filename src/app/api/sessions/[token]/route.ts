@@ -64,6 +64,7 @@ export async function GET(
     survey: {
       id: session.survey.id,
       template: {
+        name: session.survey.template.name,
         pages,
         setsPerSurvey: session.survey.template.setsPerSurvey,
       },

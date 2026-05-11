@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import HeadingEl from "@/components/runner/elements/HeadingEl";
 import TextboxEl from "@/components/runner/elements/TextboxEl";
 import ConsentEl from "@/components/runner/elements/ConsentEl";
+import DemographicsEl from "@/components/runner/elements/DemographicsEl";
 import VideoLikertEl from "@/components/runner/elements/VideoLikertEl";
 import VideoPreferenceEl from "@/components/runner/elements/VideoPreferenceEl";
 import type {
@@ -15,6 +16,7 @@ import type {
   ConsentConfig, VideoLikertConfig, VideoPreferenceConfig,
   HeadingConfig, TextboxConfig, ShortAnswerConfig,
   SingleChoiceConfig, MultiChoiceConfig, LikertConfig,
+  DemographicsConfig,
 } from "@/lib/types";
 
 type FlatPage =
@@ -54,14 +56,17 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     if (!token) return;
     fetch(`/api/sessions/${token}`).then((r) => r.json()).then((s: RunnerSession) => {
       setSession(s);
-      // Build flat page list: static before, then video pages interleaved, then static after
+      // Build flat page list — skip pages with no elements so an empty
+      // "after" section does not create a blank terminal page.
+      const nonEmpty = (p: BuilderPage) => p.elements.length > 0;
+
       const beforePages = s.survey.template.pages
-        .filter((p) => p.section === "before")
+        .filter((p) => p.section === "before" && nonEmpty(p))
         .sort((a, b) => a.orderIndex - b.orderIndex)
         .map((p): FlatPage => ({ kind: "static", page: p }));
 
       const dynamicTemplate = s.survey.template.pages
-        .filter((p) => p.section === "dynamic")
+        .filter((p) => p.section === "dynamic" && nonEmpty(p))
         .sort((a, b) => a.orderIndex - b.orderIndex)[0];
 
       const videoPages: FlatPage[] = dynamicTemplate
@@ -71,7 +76,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         : [];
 
       const afterPages = s.survey.template.pages
-        .filter((p) => p.section === "after")
+        .filter((p) => p.section === "after" && nonEmpty(p))
         .sort((a, b) => a.orderIndex - b.orderIndex)
         .map((p): FlatPage => ({ kind: "static", page: p }));
 
@@ -81,6 +86,15 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
 
   function setResponse(key: string, val: string) {
     setResponses((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function parseDemoValues(raw: string | undefined): Record<string, string> {
+    try { return JSON.parse(raw ?? "{}"); } catch { return {}; }
+  }
+
+  function setDemoField(elId: string, fieldId: string, val: string) {
+    const current = parseDemoValues(responses[elId]);
+    setResponse(elId, JSON.stringify({ ...current, [fieldId]: val }));
   }
 
   const currentFlat = flatPages[pageIndex];
@@ -99,6 +113,12 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
       if (type === "consent") {
         const val = responses[el.id] ?? "";
         if (!val) return false;
+      } else if (type === "demographics") {
+        const c = el.config as DemographicsConfig;
+        const vals = parseDemoValues(responses[el.id]);
+        for (const field of c.fields) {
+          if (field.required && !vals[field.id]) return false;
+        }
       } else if (type === "video_likert" && videoSet) {
         for (const slot of videoSet.slots) {
           if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`]) return false;
@@ -147,6 +167,16 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     }
   }
 
+  // Set browser title once template name is known
+  useEffect(() => {
+    if (session) document.title = session.survey.template.name;
+  }, [session]);
+
+  // Scroll to top whenever the page changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [pageIndex]);
+
   async function next() {
     if (!validatePage()) {
       alert("Please answer all required questions before continuing.");
@@ -173,6 +203,12 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         return <ConsentEl config={el.config as ConsentConfig} elementId={el.id}
           value={responses[el.id] ?? ""}
           onChange={(v) => setResponse(el.id, v)} />;
+      case "demographics":
+        return <DemographicsEl
+          config={el.config as DemographicsConfig}
+          values={parseDemoValues(responses[el.id])}
+          onChange={(fieldId, val) => setDemoField(el.id, fieldId, val)}
+        />;
       case "short_answer":
         return (
           <div className="space-y-2">
@@ -285,14 +321,32 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   );
 
   const videoSet = currentFlat?.kind === "video" ? currentFlat.videoSet : undefined;
+  const totalVideoSets = session.survey.videoSets.length;
 
   return (
     <div className="min-h-screen bg-zinc-50">
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+        <h1 className="text-2xl font-bold text-zinc-900 text-center">
+          {session.survey.template.name}
+        </h1>
+
         <Progress value={progress} className="h-1.5" />
 
         <Card>
           <CardContent className="py-8 px-8 space-y-8">
+            {videoSet && totalVideoSets > 1 && (
+              <div className="flex items-center justify-between border-b border-zinc-100 pb-4 -mt-2">
+                <span className="text-sm font-medium text-zinc-500">
+                  Video Set {videoSet.positionIndex + 1} / {totalVideoSets}
+                </span>
+                <div className="flex gap-1">
+                  {Array.from({ length: totalVideoSets }).map((_, i) => (
+                    <div key={i} className={`h-1.5 w-6 rounded-full transition-colors
+                      ${i <= videoSet.positionIndex ? "bg-zinc-800" : "bg-zinc-200"}`} />
+                  ))}
+                </div>
+              </div>
+            )}
             {currentFlat?.page.elements.map((el) => (
               <div key={el.id}>{renderElement(el, videoSet)}</div>
             ))}

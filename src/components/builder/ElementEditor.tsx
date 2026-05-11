@@ -1,9 +1,33 @@
 "use client";
+import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { TiptapEditor } from "@/components/ui/tiptap-editor";
 import type { BuilderElement, VideoLikertConfig, LikertConfig } from "@/lib/types";
+
+// Holds raw string locally; only fires onChange on blur so commas/equals
+// can be typed mid-entry without being immediately stripped by the parser.
+function DeferredInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+  return (
+    <Input
+      value={local}
+      placeholder={placeholder}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => onChange(local)}
+    />
+  );
+}
 
 type Props = { element: BuilderElement; onChange: (el: BuilderElement) => void };
 
@@ -78,19 +102,23 @@ export default function ElementEditor({ element, onChange }: Props) {
             <Input value={c.prompt} onChange={(e) => patch({ prompt: e.target.value })} /></div>
           <div className="space-y-1">
             <Label>Scale points (comma-separated, e.g. 1,2,3,4,5)</Label>
-            <Input value={c.scalePoints.join(",")}
-              onChange={(e) => {
-                const pts = e.target.value.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+            <DeferredInput
+              value={c.scalePoints.join(",")}
+              placeholder="1,2,3,4,5"
+              onChange={(raw) => {
+                const pts = raw.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
                 patch({ scalePoints: pts });
-              }} />
+              }}
+            />
           </div>
           <div className="space-y-1">
             <Label>Scale labels (format: 1=Poor,5=Excellent)</Label>
-            <Input
+            <DeferredInput
               value={Object.entries(c.scaleLabels).map(([k, v]) => `${k}=${v}`).join(",")}
-              onChange={(e) => {
+              placeholder="1=Poor,5=Excellent"
+              onChange={(raw) => {
                 const labels: Record<string, string> = {};
-                e.target.value.split(",").forEach((pair) => {
+                raw.split(",").forEach((pair) => {
                   const [k, ...rest] = pair.split("=");
                   if (k && rest.length) labels[k.trim()] = rest.join("=").trim();
                 });

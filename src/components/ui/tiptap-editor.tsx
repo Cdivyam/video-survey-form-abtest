@@ -1,4 +1,5 @@
 "use client";
+import { useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -50,6 +51,14 @@ export function TiptapEditor({ content, onChange, placeholder }: Props) {
       attributes: { class: "tiptap-prose min-h-[120px] px-3 py-2 focus:outline-none" },
     },
   });
+
+  // Sync when the content prop changes from outside (e.g. switching selected elements).
+  // Guard against the editor's own updates to avoid loops.
+  useEffect(() => {
+    if (editor && content !== editor.getHTML()) {
+      editor.commands.setContent(content, { emitUpdate: false });
+    }
+  }, [content, editor]);
 
   if (!editor) return null;
 

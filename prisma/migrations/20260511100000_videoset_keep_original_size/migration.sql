@@ -1,0 +1,1 @@
+ALTER TABLE "VideoSet" ADD COLUMN "keepOriginalSize" BOOLEAN NOT NULL DEFAULT 0;

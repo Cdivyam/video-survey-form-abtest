@@ -47,7 +47,15 @@ export async function POST(
     return NextResponse.json({ id: survey.id, slug }, { status: 201 });
   }
 
-  type SetWithVideos = { id: string; videos: { id: string; fileUrl: string }[] };
+  type SetWithVideos = {
+    id: string;
+    layout: string;
+    cropX: number;
+    cropY: number;
+    padding: number;
+    keepOriginalSize: boolean;
+    videos: { id: string; fileUrl: string }[];
+  };
 
   // Fetch all videosets with completion counts
   const allSets: SetWithVideos[] = await prisma.videoSet.findMany({
@@ -99,7 +107,7 @@ export async function POST(
 
 async function renderComposites(
   surveyId: string,
-  sets: Array<{ id: string; videos: Array<{ id: string; fileUrl: string }> }>,
+  sets: Array<{ id: string; layout: string; cropX: number; cropY: number; padding: number; keepOriginalSize: boolean; videos: Array<{ id: string; fileUrl: string }> }>,
   svs: Array<{ id: string; slotMap: string }>
 ) {
   for (let i = 0; i < sets.length; i++) {
@@ -124,14 +132,23 @@ async function renderComposites(
       data: { compositeStatus: "rendering" },
     });
 
+    console.log(`[composite] rendering ${i + 1}/${sets.length} — svsId=${svsRow.id} slots=${slotLabels.join(",")} layout=${set.layout} cropX=${set.cropX} cropY=${set.cropY} padding=${set.padding}`);
+
     try {
-      await createComposite(inputPaths, slotLabels, outputPath);
+      await createComposite(inputPaths, slotLabels, outputPath, {
+        layout: (set.layout === "vertical" ? "vertical" : "horizontal"),
+        cropX: set.cropX,
+        cropY: set.cropY,
+        padding: set.padding,
+        keepOriginalSize: set.keepOriginalSize,
+      });
+      console.log(`[composite] ready — svsId=${svsRow.id}`);
       await prisma.surveyVideoSet.update({
         where: { id: svsRow.id },
         data: { compositeUrl, compositeStatus: "ready" },
       });
     } catch (err) {
-      console.error(`Composite failed for ${svsRow.id}:`, err);
+      console.error(`[composite] FAILED — svsId=${svsRow.id}:`, err);
       await prisma.surveyVideoSet.update({
         where: { id: svsRow.id },
         data: { compositeStatus: "failed" },

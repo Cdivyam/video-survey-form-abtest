@@ -1,19 +1,30 @@
 "use client";
+import { useMemo } from "react";
 import type { VideoLikertConfig, SlotLabel } from "@/lib/types";
+
+function sanitize(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/\s+on\w+="[^"]*"/gi, "")
+    .replace(/\s+on\w+='[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
+}
 
 type Props = {
   config: VideoLikertConfig;
   elementId: string;
   slots: SlotLabel[];
   surveyVideoSetId: string;
-  values: Record<string, string>; // slotLabel → value
+  values: Record<string, string>;
   onChange: (slotLabel: SlotLabel, val: string) => void;
 };
 
-export default function VideoLikertEl({ config, slots, values, onChange }: Props) {
+export default function VideoLikertEl({ config, elementId, slots, values, onChange }: Props) {
+  const cleanPrompt = useMemo(() => sanitize(config.prompt ?? ""), [config.prompt]);
+
   return (
     <div className="space-y-3">
-      <p className="font-medium text-zinc-900">{config.prompt}</p>
+      <div className="prose-content font-medium text-zinc-900" dangerouslySetInnerHTML={{ __html: cleanPrompt }} />
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -37,7 +48,7 @@ export default function VideoLikertEl({ config, slots, values, onChange }: Props
                   <td key={pt} className="text-center px-2 py-3">
                     <input
                       type="radio"
-                      name={`video-likert-${slot}`}
+                      name={`video-likert-${elementId}-${slot}`}
                       value={String(pt)}
                       checked={values[slot] === String(pt)}
                       onChange={() => onChange(slot, String(pt))}

@@ -1,5 +1,14 @@
 "use client";
+import { useMemo } from "react";
 import type { VideoPreferenceConfig, SlotLabel } from "@/lib/types";
+
+function sanitize(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/\s+on\w+="[^"]*"/gi, "")
+    .replace(/\s+on\w+='[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
+}
 
 type Props = {
   config: VideoPreferenceConfig;
@@ -9,9 +18,11 @@ type Props = {
 };
 
 export default function VideoPreferenceEl({ config, slots, value, onChange }: Props) {
+  const cleanPrompt = useMemo(() => sanitize(config.prompt ?? ""), [config.prompt]);
+
   return (
     <div className="space-y-3">
-      <p className="font-medium text-zinc-900">{config.prompt}</p>
+      <div className="prose-content font-medium text-zinc-900" dangerouslySetInnerHTML={{ __html: cleanPrompt }} />
       <div className="flex flex-wrap gap-3">
         {slots.map((slot) => (
           <label key={slot}

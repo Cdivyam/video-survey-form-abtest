@@ -23,15 +23,54 @@ function probeHasAudio(filePath: string): Promise<boolean> {
   });
 }
 
+// Returns video dimensions (width × height) or null if probe fails
+export function probeVideoDimensions(
+  filePath: string
+): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (_err, metadata) => {
+      if (_err) return resolve(null);
+      const stream = metadata?.streams?.find((s) => s.codec_type === "video");
+      resolve(
+        stream && stream.width && stream.height
+          ? { width: stream.width, height: stream.height }
+          : null
+      );
+    });
+  });
+}
+
+export type CompositeSettings = {
+  layout: "horizontal" | "vertical";
+  cropX: number;
+  cropY: number;
+  padding: number;
+  keepOriginalSize: boolean;
+};
+
+const DEFAULT_SETTINGS: CompositeSettings = {
+  layout: "horizontal",
+  cropX: 0,
+  cropY: 0,
+  padding: 0,
+  keepOriginalSize: false,
+};
+
+// Default scaled dimensions when keepOriginalSize is false
+const SCALED_W = 640;
+const SCALED_H = 360;
+
 export async function createComposite(
   inputPaths: string[],
   slotLabels: string[],
-  outputPath: string
+  outputPath: string,
+  settings: CompositeSettings = DEFAULT_SETTINGS
 ): Promise<void> {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
   const fontPath = getFontPath();
   const n = inputPaths.length;
+  const { layout, cropX, cropY, padding, keepOriginalSize } = settings;
 
   // Probe each input for audio before building the filter graph
   const audioPresent = await Promise.all(inputPaths.map(probeHasAudio));
@@ -40,49 +79,64 @@ export async function createComposite(
     .filter(Boolean) as string[];
 
   return new Promise((resolve, reject) => {
-    // Scale each video to 640x360
-    const scaleFilters = inputPaths.map(
-      (_, i) => `[${i}:v]scale=640:360,setsar=1[v${i}]`
-    );
+    // Per-video filter: crop (if needed), then scale (or just force even dims)
+    const perVideoFilters = inputPaths.map((_, i) => {
+      const crop =
+        cropX > 0 || cropY > 0
+          ? `crop=iw-${cropX}:ih-${cropY}:${cropX}:${cropY},`
+          : "";
+      // keepOriginalSize: only fix even dimensions; otherwise scale to 640×360
+      const scale = keepOriginalSize
+        ? `scale=trunc(iw/2)*2:trunc(ih/2)*2`
+        : `scale=${SCALED_W}:${SCALED_H}`;
+      return `[${i}:v]${crop}${scale},setsar=1[v${i}]`;
+    });
 
-    // Stack side by side
+    // xstack layout positions with padding between slots
     const stackInputs = inputPaths.map((_, i) => `[v${i}]`).join("");
-    const stackFilter = `${stackInputs}xstack=inputs=${n}:layout=${inputPaths
-      .map((_, i) => `${i * 640}_0`)
-      .join("|")}[stacked]`;
+    const positions = inputPaths
+      .map((_, i) =>
+        layout === "vertical"
+          ? `0_${i * (SCALED_H + padding)}`
+          : `${i * (SCALED_W + padding)}_0`
+      )
+      .join("|");
+    const stackFilter = `${stackInputs}xstack=inputs=${n}:layout=${positions}[stacked]`;
 
-    // Burn slot labels
+    // Burn slot labels in top-left corner of each video slot
     const fp = escapeFfmpegPath(fontPath);
     const labelFilters = slotLabels.map((label, i) => {
-      const x = i * 640 + 8;
+      const lx =
+        layout === "vertical" ? 8 : i * (SCALED_W + padding) + 8;
+      const ly =
+        layout === "vertical" ? i * (SCALED_H + padding) + 8 : 8;
       return [
-        `drawbox=x=${x}:y=8:w=52:h=58:color=black@0.6:t=fill`,
-        `drawtext=fontfile='${fp}':text='${label}':fontsize=42:fontcolor=white:x=${x + 8}:y=12`,
+        `drawbox=x=${lx}:y=${ly}:w=52:h=58:color=black@0.6:t=fill`,
+        `drawtext=fontfile='${fp}':text='${label}':fontsize=42:fontcolor=white:x=${lx + 8}:y=${ly + 4}`,
       ].join(",");
     });
     const drawFilters = labelFilters.join(",");
 
     const filterParts: string[] = [
-      ...scaleFilters,
+      ...perVideoFilters,
       stackFilter,
-      `[stacked]${drawFilters}[out]`,
+      // libx264 requires even width and height — round down by 1px if odd (imperceptible)
+      `[stacked]scale=trunc(iw/2)*2:trunc(ih/2)*2[stacked_e]`,
+      `[stacked_e]${drawFilters}[out]`,
     ];
 
     // Mix audio from whichever inputs have audio tracks
     const outputOptions = ["-map [out]", "-c:v libx264", "-crf 23", "-preset fast"];
 
     if (audioInputRefs.length === 1) {
-      // Single audio stream — pass through directly
       filterParts.push(`${audioInputRefs[0]}anull[aout]`);
       outputOptions.push("-map [aout]", "-c:a aac", "-b:a 128k");
     } else if (audioInputRefs.length > 1) {
-      // Multiple audio streams — mix them
       filterParts.push(
         `${audioInputRefs.join("")}amix=inputs=${audioInputRefs.length}:duration=longest:normalize=0[aout]`
       );
       outputOptions.push("-map [aout]", "-c:a aac", "-b:a 128k");
     }
-    // If no inputs have audio, no audio track is added to the composite
 
     const filterComplex = filterParts.join(";");
 
@@ -93,8 +147,10 @@ export async function createComposite(
       .complexFilter(filterComplex)
       .outputOptions(outputOptions)
       .output(outputPath)
-      .on("end", () => resolve())
-      .on("error", (err) => reject(err))
+      .on("start", (cmdLine) => console.log("[ffmpeg] start:", cmdLine))
+      .on("stderr", (line) => console.log("[ffmpeg]", line))
+      .on("end", () => { console.log("[ffmpeg] done:", outputPath); resolve(); })
+      .on("error", (err) => { console.error("[ffmpeg] error:", err.message); reject(err); })
       .run();
   });
 }

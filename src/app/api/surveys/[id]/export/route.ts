@@ -42,8 +42,8 @@ export async function GET(
   const header = [
     "survey_id", "session_id", "completed_at",
     "video_set_id", "video_set_name", "position_index",
-    "element_id", "element_type", "slot_label",
-    "video_id", "model_name", "value",
+    "element_id", "element_type", "element_name",
+    "slot_label", "video_id", "model_name", "value",
   ];
   rows.push(header);
 
@@ -54,6 +54,16 @@ export async function GET(
         ? slotMap[response.slotLabel as keyof SlotMap] ?? ""
         : "";
       const modelName = videoId ? (videoMap[videoId] ?? "") : "";
+
+      // Extract element name from config JSON if present
+      let elementName = "";
+      if (response.element?.config) {
+        try {
+          const cfg = JSON.parse(response.element.config) as Record<string, unknown>;
+          elementName = typeof cfg.name === "string" ? cfg.name : "";
+        } catch { /* ignore */ }
+      }
+
       rows.push([
         survey.id,
         response.session.id,
@@ -63,6 +73,7 @@ export async function GET(
         String(svs.positionIndex),
         response.elementId ?? "",
         response.element?.elementType ?? "",
+        elementName,
         response.slotLabel ?? "",
         videoId,
         modelName,

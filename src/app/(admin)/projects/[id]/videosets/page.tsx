@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InputDialog } from "@/components/ui/input-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 type Video = {
@@ -15,7 +17,17 @@ type Video = {
   fileUrl: string;
   originalFilename: string | null;
 };
-type VideoSet = { id: string; name: string; videos: Video[] };
+
+type VideoSet = {
+  id: string;
+  name: string;
+  layout: "horizontal" | "vertical";
+  cropX: number;
+  cropY: number;
+  padding: number;
+  keepOriginalSize: boolean;
+  videos: Video[];
+};
 
 const SLOT_LABELS = ["A", "B", "C", "D", "E"];
 
@@ -24,17 +36,13 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
   const [sets, setSets] = useState<VideoSet[]>([]);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingSetId = useRef<string | null>(null);
   const pendingModelName = useRef<string>("");
 
-  // Model name dialog for new uploads
   const [modelNameDialog, setModelNameDialog] = useState<{ setId: string } | null>(null);
-
-  // Edit model name dialog
   const [editDialog, setEditDialog] = useState<(Video & { setName: string }) | null>(null);
-
-  // Delete confirmations
   const [setToDelete, setSetToDelete] = useState<VideoSet | null>(null);
   const [videoToDelete, setVideoToDelete] = useState<(Video & { setName: string }) | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -57,6 +65,31 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     if (res.ok) { load(); }
     else toast.error("Failed to create video set");
     setCreating(false);
+  }
+
+  async function duplicateSet(vs: VideoSet) {
+    setDuplicating(vs.id);
+    const res = await fetch(`/api/videosets/${vs.id}/duplicate`, { method: "POST" });
+    if (res.ok) { toast.success("Video set duplicated"); load(); }
+    else { const err = await res.json(); toast.error(err.error ?? "Duplicate failed"); }
+    setDuplicating(null);
+  }
+
+  async function patchSet(setId: string, patch: Partial<Pick<VideoSet, "layout" | "cropX" | "cropY" | "padding" | "keepOriginalSize">>) {
+    const res = await fetch(`/api/videosets/${setId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      toast.error(err.error ?? "Failed to update settings");
+      load(); // revert optimistic update
+    }
+  }
+
+  function updateSetLocally(setId: string, patch: Partial<VideoSet>) {
+    setSets((prev) => prev.map((s) => s.id === setId ? { ...s, ...patch } : s));
   }
 
   async function confirmDeleteSet() {
@@ -124,6 +157,7 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
 
       <p className="text-zinc-500 text-sm">
         Each video set contains outputs from different models for the same prompt (up to 5 videos).
+        Composite settings (stacking, crop, padding) apply to all videos in the set.
       </p>
 
       <Button onClick={createSet} disabled={creating}>
@@ -132,17 +166,28 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
 
       <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
 
-      <div className="grid gap-4">
+      <div className="grid gap-6">
         {sets.map((vs) => (
           <Card key={vs.id}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">{vs.name}</CardTitle>
-                <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
-                  onClick={() => setSetToDelete(vs)}>Delete set</Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost" size="sm"
+                    className="text-zinc-500 hover:text-zinc-800"
+                    onClick={() => duplicateSet(vs)}
+                    disabled={duplicating === vs.id}
+                  >
+                    {duplicating === vs.id ? "Duplicating…" : "Duplicate"}
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
+                    onClick={() => setSetToDelete(vs)}>Delete set</Button>
+                </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
+              {/* Video grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {vs.videos.map((v, i) => (
                   <div key={v.id} className="relative group rounded-lg border bg-zinc-50 overflow-hidden">
@@ -181,6 +226,101 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
                     <span className="text-xs mt-1">{uploading === vs.id ? "Uploading…" : "Add video"}</span>
                   </button>
                 )}
+              </div>
+
+              {/* Composite settings */}
+              <div className="border-t pt-3">
+                <p className="text-xs font-medium text-zinc-500 mb-3">Composite settings</p>
+                <div className="flex flex-wrap items-end gap-4">
+                  {/* Stacking direction */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stacking</Label>
+                    <div className="flex rounded-md border border-zinc-200 overflow-hidden">
+                      {(["horizontal", "vertical"] as const).map((dir) => (
+                        <button
+                          key={dir}
+                          onClick={() => {
+                            updateSetLocally(vs.id, { layout: dir });
+                            patchSet(vs.id, { layout: dir });
+                          }}
+                          className={`px-3 py-1.5 text-xs font-medium transition-colors
+                            ${vs.layout === dir
+                              ? "bg-zinc-900 text-white"
+                              : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                        >
+                          {dir === "horizontal" ? "⬛▬ Side by side" : "☰ Stacked"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Crop X */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Crop left (px)</Label>
+                    <Input
+                      type="number" min={0}
+                      value={vs.cropX}
+                      className="w-24 h-8 text-sm"
+                      onChange={(e) => {
+                        const v = Math.max(0, parseInt(e.target.value) || 0);
+                        updateSetLocally(vs.id, { cropX: v });
+                      }}
+                      onBlur={() => patchSet(vs.id, { cropX: vs.cropX })}
+                    />
+                  </div>
+
+                  {/* Crop Y */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Crop top (px)</Label>
+                    <Input
+                      type="number" min={0}
+                      value={vs.cropY}
+                      className="w-24 h-8 text-sm"
+                      onChange={(e) => {
+                        const v = Math.max(0, parseInt(e.target.value) || 0);
+                        updateSetLocally(vs.id, { cropY: v });
+                      }}
+                      onBlur={() => patchSet(vs.id, { cropY: vs.cropY })}
+                    />
+                  </div>
+
+                  {/* Padding */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Gap between videos (px)</Label>
+                    <Input
+                      type="number" min={0}
+                      value={vs.padding}
+                      className="w-28 h-8 text-sm"
+                      onChange={(e) => {
+                        const v = Math.max(0, parseInt(e.target.value) || 0);
+                        updateSetLocally(vs.id, { padding: v });
+                      }}
+                      onBlur={() => patchSet(vs.id, { padding: vs.padding })}
+                    />
+                  </div>
+
+                  {/* Scale */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Output size</Label>
+                    <div className="flex rounded-md border border-zinc-200 overflow-hidden">
+                      {([false, true] as const).map((keep) => (
+                        <button
+                          key={String(keep)}
+                          onClick={() => {
+                            updateSetLocally(vs.id, { keepOriginalSize: keep });
+                            patchSet(vs.id, { keepOriginalSize: keep });
+                          }}
+                          className={`px-3 py-1.5 text-xs font-medium transition-colors
+                            ${vs.keepOriginalSize === keep
+                              ? "bg-zinc-900 text-white"
+                              : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                        >
+                          {keep ? "Original size" : "Scale to 640×360"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

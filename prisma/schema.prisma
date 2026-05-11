@@ -26,6 +26,11 @@ model VideoSet {
   id        String   @id @default(cuid())
   projectId String
   name      String
+  layout          String   @default("horizontal") // "horizontal" | "vertical"
+  cropX           Int      @default(0)
+  cropY           Int      @default(0)
+  padding         Int      @default(0)
+  keepOriginalSize Boolean  @default(false)
   createdAt DateTime @default(now())
 
   project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)

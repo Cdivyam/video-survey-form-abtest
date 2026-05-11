@@ -5,7 +5,7 @@ export type HeadingConfig = {
 };
 
 export type TextboxConfig = {
-  content: string; // markdown
+  content: string; // Tiptap HTML
 };
 
 export type ConsentConfig = {
@@ -46,16 +46,22 @@ export type LikertConfig = {
   scaleLabels: Record<string, string>; // sparse: { "1": "Poor", "5": "Excellent" }
 };
 
-export type VideosetBlockConfig = Record<string, never>;
+export type VideosetBlockConfig = {
+  name: string; // display name; used as column reference in CSV export
+};
 
 export type VideoLikertConfig = {
-  prompt: string;
+  name: string; // display name; used as column header in CSV export
+  prompt: string; // Tiptap HTML
   scalePoints: number[];
   scaleLabels: Record<string, string>;
+  videosetBlockRef: string | null; // element id of the videoset_block this rates
 };
 
 export type VideoPreferenceConfig = {
-  prompt: string;
+  name: string; // display name; used as column header in CSV export
+  prompt: string; // Tiptap HTML
+  videosetBlockRef: string | null; // element id of the videoset_block this rates
 };
 
 export type ElementType =

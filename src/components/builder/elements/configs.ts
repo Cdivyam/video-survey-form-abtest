@@ -34,9 +34,21 @@ export function defaultConfig(type: ElementType): ElementConfig {
     case "multi_choice": return { prompt: "Select all that apply:", options: ["Option A", "Option B", "Option C"] };
     case "short_answer": return { prompt: "Your answer:", placeholder: "Type here…" };
     case "likert": return { prompt: "Rate the following:", scalePoints: [1,2,3,4,5], scaleLabels: { "1": "Strongly Disagree", "5": "Strongly Agree" } };
-    case "videoset_block": return {};
-    case "video_likert": return { prompt: "Rate each video:", scalePoints: [1,2,3,4,5], scaleLabels: { "1": "Poor", "5": "Excellent" } };
-    case "video_preference": return { prompt: "Which video do you prefer most?" };
-    default: return {};
+    case "videoset_block": return { name: "Video Set Block" };
+    case "video_likert": return { name: "Video Likert", prompt: "<p>Rate each video:</p>", scalePoints: [1,2,3,4,5], scaleLabels: { "1": "Poor", "5": "Excellent" }, videosetBlockRef: null };
+    case "video_preference": return { name: "Video Preference", prompt: "<p>Which video do you prefer most?</p>", videosetBlockRef: null };
   }
+}
+
+/** Returns the display label for an element, using custom name when set. */
+export function elementDisplayLabel(el: { elementType: ElementType; config: ElementConfig }): string {
+  if (
+    el.elementType === "videoset_block" ||
+    el.elementType === "video_likert" ||
+    el.elementType === "video_preference"
+  ) {
+    const name = (el.config as { name?: string }).name?.trim();
+    if (name) return name;
+  }
+  return ELEMENT_LABELS[el.elementType];
 }

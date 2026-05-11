@@ -17,9 +17,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ElementEditor from "@/components/builder/ElementEditor";
-import { ELEMENT_LABELS, VIDEO_ELEMENTS, GENERAL_ELEMENTS, defaultConfig } from "@/components/builder/elements/configs";
+import {
+  ELEMENT_LABELS, VIDEO_ELEMENTS, GENERAL_ELEMENTS, defaultConfig, elementDisplayLabel,
+} from "@/components/builder/elements/configs";
 import { toast } from "sonner";
-import type { BuilderPage, BuilderElement, ElementType, PageSection } from "@/lib/types";
+import type { BuilderPage, BuilderElement, ElementType, PageSection, VideosetBlockConfig } from "@/lib/types";
 import { nanoid } from "nanoid";
 
 const SECTION_LABELS: Record<PageSection, string> = {
@@ -44,7 +46,7 @@ function SortableElement({
       onClick={onSelect}
     >
       <span {...attributes} {...listeners} className="cursor-grab text-zinc-300 select-none">⠿</span>
-      <span className="flex-1 font-medium text-zinc-700">{ELEMENT_LABELS[el.elementType]}</span>
+      <span className="flex-1 font-medium text-zinc-700 truncate">{elementDisplayLabel(el)}</span>
       <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
         className="text-zinc-300 hover:text-red-500 transition-colors">✕</button>
     </div>
@@ -87,6 +89,15 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
   const activePage = pages.find((p) => p.section === activeSection)!;
   const selectedElement = activePage.elements.find((e) => e.id === selectedElementId) ?? null;
+
+  // Videoset blocks in the dynamic section — passed to ElementEditor for the ref dropdown
+  const dynamicPage = pages.find((p) => p.section === "dynamic");
+  const videosetBlocks = (dynamicPage?.elements ?? [])
+    .filter((e) => e.elementType === "videoset_block")
+    .map((e) => ({
+      id: e.id,
+      name: ((e.config as VideosetBlockConfig).name?.trim() || "Video Set Block"),
+    }));
 
   function updatePage(updated: BuilderPage) {
     setPages((ps) => ps.map((p) => (p.section === updated.section ? updated : p)));
@@ -191,7 +202,11 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           </CardHeader>
           <CardContent className="px-4 py-3">
             {selectedElement ? (
-              <ElementEditor element={selectedElement} onChange={updateElement} />
+              <ElementEditor
+                element={selectedElement}
+                onChange={updateElement}
+                videosetBlocks={isVideoSection ? videosetBlocks : []}
+              />
             ) : (
               <p className="text-zinc-400 text-sm">Select an element from the canvas to edit its properties</p>
             )}

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, use, useRef } from "react";
+import React, { useEffect, useState, use, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -83,14 +83,14 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     try {
       const res = await fetch(`/api/projects/${id}/test-composites`, { method: "POST" });
       const data = await res.json() as {
-        results: { videoSetId: string; status: string; testCompositeUrl: string | null }[]
+        results: { videoSetId: string; status: string; testCompositeUrl: string | null; testCompositeHash: string | null }[]
       };
 
-      // Update testCompositeUrl for each set from the results
+      // Update testCompositeUrl + hash for each set from the results
       setSets((prev) => prev.map((s) => {
         const result = data.results.find((r) => r.videoSetId === s.id);
         if (!result || result.status === "empty") return s;
-        return { ...s, testCompositeUrl: result.testCompositeUrl };
+        return { ...s, testCompositeUrl: result.testCompositeUrl, testCompositeHash: result.testCompositeHash };
       }));
 
       const generated = data.results.filter((r) => r.status === "generated").length;
@@ -210,13 +210,16 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
 
       <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
 
-      {/* Two-column layout: cards left, preview sidebar right */}
-      <div className={sets.length > 0 ? "grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 items-start" : ""}>
+      {/*
+        Flat grid: card and preview for each VideoSet are consecutive direct children.
+        CSS Grid auto-places them as a pair on the same row, stretching both to equal height.
+      */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-x-6 gap-y-6">
+        {sets.map((vs) => (
+          <React.Fragment key={vs.id}>
 
-        {/* Left: VideoSet cards */}
-        <div className="space-y-6">
-          {sets.map((vs) => (
-            <Card key={vs.id}>
+            {/* Left column: VideoSet card */}
+            <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">{vs.name}</CardTitle>
@@ -372,56 +375,41 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
                 </div>
               </CardContent>
             </Card>
-          ))}
-          {sets.length === 0 && <p className="text-zinc-400 text-sm">No video sets yet. Click "Add Video Set" above.</p>}
-        </div>
 
-        {/* Right: preview sidebar */}
-        {setsWithVideos.length > 0 && (
-          <div className="xl:sticky xl:top-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-zinc-700">Composite Previews</p>
-              {generatingPreviews && (
-                <span className="text-xs text-zinc-400 animate-pulse">Generating…</span>
-              )}
+            {/* Right column: preview panel — same grid row, same height as card */}
+            <div className="rounded-lg border bg-white overflow-hidden flex flex-col">
+              <div className="px-3 py-2 border-b bg-zinc-50 flex items-center justify-between gap-2 shrink-0">
+                <span className="text-xs font-medium text-zinc-700 truncate">{vs.name}</span>
+                <div className="flex gap-1 shrink-0">
+                  {vs.videos.map((_, i) => (
+                    <span key={i} className="text-xs bg-zinc-200 text-zinc-600 rounded px-1 font-mono">
+                      {SLOT_LABELS[i]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 flex items-center justify-center bg-zinc-50">
+                {vs.videos.length === 0 ? (
+                  <span className="text-xs text-zinc-400 px-3 text-center">Add videos to enable preview</span>
+                ) : generatingPreviews ? (
+                  <span className="text-xs text-zinc-400 animate-pulse">Generating…</span>
+                ) : vs.testCompositeUrl ? (
+                  <video
+                    key={vs.testCompositeHash ?? vs.testCompositeUrl}
+                    src={`${vs.testCompositeUrl}?v=${vs.testCompositeHash ?? "1"}`}
+                    controls
+                    className="w-full"
+                  />
+                ) : (
+                  <span className="text-xs text-zinc-400 px-3 text-center">No preview — click Generate Previews</span>
+                )}
+              </div>
             </div>
 
-            {sets.map((vs) => {
-              if (vs.videos.length === 0) return null;
-              return (
-                <div key={vs.id} className="rounded-lg border bg-white overflow-hidden">
-                  <div className="px-3 py-2 border-b bg-zinc-50 flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-zinc-700 truncate">{vs.name}</span>
-                    <div className="flex gap-1 shrink-0">
-                      {vs.videos.map((_, i) => (
-                        <span key={i} className="text-xs bg-zinc-200 text-zinc-600 rounded px-1 font-mono">
-                          {SLOT_LABELS[i]}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  {generatingPreviews ? (
-                    <div className="aspect-video bg-zinc-100 flex items-center justify-center">
-                      <span className="text-xs text-zinc-400 animate-pulse">Generating…</span>
-                    </div>
-                  ) : vs.testCompositeUrl ? (
-                    <video
-                      key={vs.testCompositeUrl}
-                      src={vs.testCompositeUrl}
-                      controls
-                      className="w-full"
-                    />
-                  ) : (
-                    <div className="aspect-video bg-zinc-50 flex items-center justify-center">
-                      <span className="text-xs text-zinc-400">No preview — click Generate Previews</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+          </React.Fragment>
+        ))}
       </div>
+      {sets.length === 0 && <p className="text-zinc-400 text-sm">No video sets yet. Click "Add Video Set" above.</p>}
 
       {/* Model name dialog for new upload */}
       <InputDialog

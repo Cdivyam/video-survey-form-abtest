@@ -48,11 +48,12 @@ export async function POST(
     videoSetId: string;
     status: "generated" | "skipped" | "failed" | "empty";
     testCompositeUrl: string | null;
+    testCompositeHash: string | null;
   }[] = [];
 
   for (const vs of sets) {
     if (vs.videos.length === 0) {
-      results.push({ videoSetId: vs.id, status: "empty", testCompositeUrl: null });
+      results.push({ videoSetId: vs.id, status: "empty", testCompositeUrl: null, testCompositeHash: null });
       continue;
     }
 
@@ -63,7 +64,7 @@ export async function POST(
       const filePath = localPath(vs.testCompositeUrl);
       const exists = await fs.access(filePath).then(() => true).catch(() => false);
       if (exists) {
-        results.push({ videoSetId: vs.id, status: "skipped", testCompositeUrl: vs.testCompositeUrl });
+        results.push({ videoSetId: vs.id, status: "skipped", testCompositeUrl: vs.testCompositeUrl, testCompositeHash: currentHash });
         continue;
       }
     }
@@ -92,11 +93,11 @@ export async function POST(
         where: { id: vs.id },
         data: { testCompositeUrl, testCompositeHash: currentHash },
       });
-      results.push({ videoSetId: vs.id, status: "generated", testCompositeUrl });
+      results.push({ videoSetId: vs.id, status: "generated", testCompositeUrl, testCompositeHash: currentHash });
       console.log(`[test-composite] done: ${vs.name}`);
     } catch (err) {
       console.error(`[test-composite] failed: ${vs.name}`, err);
-      results.push({ videoSetId: vs.id, status: "failed", testCompositeUrl: vs.testCompositeUrl ?? null });
+      results.push({ videoSetId: vs.id, status: "failed", testCompositeUrl: vs.testCompositeUrl ?? null, testCompositeHash: vs.testCompositeHash ?? null });
     }
   }
 

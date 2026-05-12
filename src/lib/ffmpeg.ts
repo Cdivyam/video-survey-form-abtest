@@ -78,6 +78,21 @@ export async function createComposite(
     .map((has, i) => (has ? `[${i}:a]` : null))
     .filter(Boolean) as string[];
 
+  // When keeping original size, probe actual post-crop dimensions for xstack positions.
+  // Assume all videos in the set share the same source dimensions (same prompt, diff models).
+  let slotW = SCALED_W;
+  let slotH = SCALED_H;
+  if (keepOriginalSize && inputPaths.length > 0) {
+    const dims = await probeVideoDimensions(inputPaths[0]);
+    if (dims) {
+      // Apply the same crop formula used in the filter graph, then round to even
+      const rawW = Math.max(1, dims.width - cropX);
+      const rawH = Math.max(1, dims.height - cropY);
+      slotW = Math.floor(rawW / 2) * 2;
+      slotH = Math.floor(rawH / 2) * 2;
+    }
+  }
+
   return new Promise((resolve, reject) => {
     // Per-video filter: crop (if needed), then scale (or just force even dims)
     const perVideoFilters = inputPaths.map((_, i) => {
@@ -85,20 +100,19 @@ export async function createComposite(
         cropX > 0 || cropY > 0
           ? `crop=iw-${cropX}:ih-${cropY}:${cropX}:${cropY},`
           : "";
-      // keepOriginalSize: only fix even dimensions; otherwise scale to 640×360
       const scale = keepOriginalSize
         ? `scale=trunc(iw/2)*2:trunc(ih/2)*2`
         : `scale=${SCALED_W}:${SCALED_H}`;
       return `[${i}:v]${crop}${scale},setsar=1[v${i}]`;
     });
 
-    // xstack layout positions with padding between slots
+    // xstack layout positions — use actual slot dimensions (probed above for original size)
     const stackInputs = inputPaths.map((_, i) => `[v${i}]`).join("");
     const positions = inputPaths
       .map((_, i) =>
         layout === "vertical"
-          ? `0_${i * (SCALED_H + padding)}`
-          : `${i * (SCALED_W + padding)}_0`
+          ? `0_${i * (slotH + padding)}`
+          : `${i * (slotW + padding)}_0`
       )
       .join("|");
     const stackFilter = `${stackInputs}xstack=inputs=${n}:layout=${positions}[stacked]`;
@@ -107,9 +121,9 @@ export async function createComposite(
     const fp = escapeFfmpegPath(fontPath);
     const labelFilters = slotLabels.map((label, i) => {
       const lx =
-        layout === "vertical" ? 8 : i * (SCALED_W + padding) + 8;
+        layout === "vertical" ? 8 : i * (slotW + padding) + 8;
       const ly =
-        layout === "vertical" ? i * (SCALED_H + padding) + 8 : 8;
+        layout === "vertical" ? i * (slotH + padding) + 8 : 8;
       return [
         `drawbox=x=${lx}:y=${ly}:w=52:h=58:color=black@0.6:t=fill`,
         `drawtext=fontfile='${fp}':text='${label}':fontsize=42:fontcolor=white:x=${lx + 8}:y=${ly + 4}`,

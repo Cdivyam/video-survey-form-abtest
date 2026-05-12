@@ -58,3 +58,4 @@ dev.db-shm
 /dev_docs/
 
 keys
+*.csv

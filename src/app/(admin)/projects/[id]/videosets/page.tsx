@@ -26,6 +26,8 @@ type VideoSet = {
   cropY: number;
   padding: number;
   keepOriginalSize: boolean;
+  testCompositeUrl: string | null;
+  testCompositeHash: string | null;
   videos: Video[];
 };
 
@@ -37,6 +39,7 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
+  const [generatingPreviews, setGeneratingPreviews] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingSetId = useRef<string | null>(null);
   const pendingModelName = useRef<string>("");
@@ -75,6 +78,34 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     setDuplicating(null);
   }
 
+  async function generatePreviews() {
+    setGeneratingPreviews(true);
+    try {
+      const res = await fetch(`/api/projects/${id}/test-composites`, { method: "POST" });
+      const data = await res.json() as {
+        results: { videoSetId: string; status: string; testCompositeUrl: string | null }[]
+      };
+
+      // Update testCompositeUrl for each set from the results
+      setSets((prev) => prev.map((s) => {
+        const result = data.results.find((r) => r.videoSetId === s.id);
+        if (!result || result.status === "empty") return s;
+        return { ...s, testCompositeUrl: result.testCompositeUrl };
+      }));
+
+      const generated = data.results.filter((r) => r.status === "generated").length;
+      const skipped = data.results.filter((r) => r.status === "skipped").length;
+      const failed = data.results.filter((r) => r.status === "failed").length;
+
+      if (failed > 0) toast.error(`${failed} composite(s) failed — check server logs`);
+      else if (generated === 0 && skipped > 0) toast.success("All previews are up to date");
+      else toast.success(`Generated ${generated} preview(s)${skipped > 0 ? `, ${skipped} unchanged` : ""}`);
+    } catch {
+      toast.error("Failed to generate previews");
+    }
+    setGeneratingPreviews(false);
+  }
+
   async function patchSet(setId: string, patch: Partial<Pick<VideoSet, "layout" | "cropX" | "cropY" | "padding" | "keepOriginalSize">>) {
     const res = await fetch(`/api/videosets/${setId}`, {
       method: "PATCH",
@@ -84,7 +115,7 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     if (!res.ok) {
       const err = await res.json();
       toast.error(err.error ?? "Failed to update settings");
-      load(); // revert optimistic update
+      load();
     }
   }
 
@@ -147,6 +178,8 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     else toast.error("Failed to update model name");
   }
 
+  const setsWithVideos = sets.filter((s) => s.videos.length > 0);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -160,172 +193,234 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
         Composite settings (stacking, crop, padding) apply to all videos in the set.
       </p>
 
-      <Button onClick={createSet} disabled={creating}>
-        {creating ? "Creating…" : "+ Add Video Set"}
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button onClick={createSet} disabled={creating}>
+          {creating ? "Creating…" : "+ Add Video Set"}
+        </Button>
+        {setsWithVideos.length > 0 && (
+          <Button
+            variant="outline"
+            onClick={generatePreviews}
+            disabled={generatingPreviews}
+          >
+            {generatingPreviews ? "Generating previews…" : "Generate Previews"}
+          </Button>
+        )}
+      </div>
 
       <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
 
-      <div className="grid gap-6">
-        {sets.map((vs) => (
-          <Card key={vs.id}>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">{vs.name}</CardTitle>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost" size="sm"
-                    className="text-zinc-500 hover:text-zinc-800"
-                    onClick={() => duplicateSet(vs)}
-                    disabled={duplicating === vs.id}
-                  >
-                    {duplicating === vs.id ? "Duplicating…" : "Duplicate"}
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
-                    onClick={() => setSetToDelete(vs)}>Delete set</Button>
+      {/* Two-column layout: cards left, preview sidebar right */}
+      <div className={sets.length > 0 ? "grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 items-start" : ""}>
+
+        {/* Left: VideoSet cards */}
+        <div className="space-y-6">
+          {sets.map((vs) => (
+            <Card key={vs.id}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">{vs.name}</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost" size="sm"
+                      className="text-zinc-500 hover:text-zinc-800"
+                      onClick={() => duplicateSet(vs)}
+                      disabled={duplicating === vs.id}
+                    >
+                      {duplicating === vs.id ? "Duplicating…" : "Duplicate"}
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
+                      onClick={() => setSetToDelete(vs)}>Delete set</Button>
+                  </div>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Video grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {vs.videos.map((v, i) => (
-                  <div key={v.id} className="relative group rounded-lg border bg-zinc-50 overflow-hidden">
-                    <video src={v.fileUrl} className="w-full aspect-video object-cover" muted />
-                    <div className="px-2 py-2 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <Badge variant="outline" className="text-xs">{SLOT_LABELS[i]}</Badge>
-                        <button
-                          onClick={() => setVideoToDelete({ ...v, setName: vs.name })}
-                          className="text-red-400 hover:text-red-600 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                        >✕</button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Video grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {vs.videos.map((v, i) => (
+                    <div key={v.id} className="relative group rounded-lg border bg-zinc-50 overflow-hidden">
+                      <video src={v.fileUrl} className="w-full aspect-video object-cover" muted />
+                      <div className="px-2 py-2 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <Badge variant="outline" className="text-xs">{SLOT_LABELS[i]}</Badge>
+                          <button
+                            onClick={() => setVideoToDelete({ ...v, setName: vs.name })}
+                            className="text-red-400 hover:text-red-600 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                          >✕</button>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <p className="text-xs font-medium text-zinc-700 truncate">{v.modelName}</p>
+                          <button
+                            onClick={() => setEditDialog({ ...v, setName: vs.name })}
+                            className="text-zinc-300 hover:text-zinc-600 text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                            title="Edit model name"
+                          >✎</button>
+                        </div>
+                        {v.originalFilename && (
+                          <p className="text-xs text-zinc-400 break-all">
+                            {v.originalFilename}
+                          </p>
+                        )}
                       </div>
-                      <div className="flex items-center justify-between gap-1">
-                        <p className="text-xs font-medium text-zinc-700 truncate">{v.modelName}</p>
-                        <button
-                          onClick={() => setEditDialog({ ...v, setName: vs.name })}
-                          className="text-zinc-300 hover:text-zinc-600 text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                          title="Edit model name"
-                        >✎</button>
+                    </div>
+                  ))}
+                  {vs.videos.length < 5 && (
+                    <button
+                      onClick={() => openModelNameDialog(vs.id)}
+                      disabled={uploading === vs.id}
+                      className="rounded-lg border-2 border-dashed border-zinc-300 flex flex-col items-center justify-center aspect-video text-zinc-400 hover:border-zinc-500 hover:text-zinc-600 transition-colors disabled:opacity-50"
+                    >
+                      <span className="text-2xl">+</span>
+                      <span className="text-xs mt-1">{uploading === vs.id ? "Uploading…" : "Add video"}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Composite settings */}
+                <div className="border-t pt-3">
+                  <p className="text-xs font-medium text-zinc-500 mb-3">Composite settings</p>
+                  <div className="flex flex-wrap items-end gap-4">
+                    {/* Stacking direction */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Stacking</Label>
+                      <div className="flex rounded-md border border-zinc-200 overflow-hidden">
+                        {(["horizontal", "vertical"] as const).map((dir) => (
+                          <button
+                            key={dir}
+                            onClick={() => {
+                              updateSetLocally(vs.id, { layout: dir });
+                              patchSet(vs.id, { layout: dir });
+                            }}
+                            className={`px-3 py-1.5 text-xs font-medium transition-colors
+                              ${vs.layout === dir
+                                ? "bg-zinc-900 text-white"
+                                : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                          >
+                            {dir === "horizontal" ? "⬛▬ Side by side" : "☰ Stacked"}
+                          </button>
+                        ))}
                       </div>
-                      {v.originalFilename && (
-                        <p className="text-xs text-zinc-400 truncate" title={v.originalFilename}>
-                          {v.originalFilename}
-                        </p>
-                      )}
+                    </div>
+
+                    {/* Crop X */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Crop left (px)</Label>
+                      <Input
+                        type="number" min={0}
+                        value={vs.cropX}
+                        className="w-24 h-8 text-sm"
+                        onChange={(e) => {
+                          const v = Math.max(0, parseInt(e.target.value) || 0);
+                          updateSetLocally(vs.id, { cropX: v });
+                        }}
+                        onBlur={() => patchSet(vs.id, { cropX: vs.cropX })}
+                      />
+                    </div>
+
+                    {/* Crop Y */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Crop top (px)</Label>
+                      <Input
+                        type="number" min={0}
+                        value={vs.cropY}
+                        className="w-24 h-8 text-sm"
+                        onChange={(e) => {
+                          const v = Math.max(0, parseInt(e.target.value) || 0);
+                          updateSetLocally(vs.id, { cropY: v });
+                        }}
+                        onBlur={() => patchSet(vs.id, { cropY: vs.cropY })}
+                      />
+                    </div>
+
+                    {/* Padding */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Gap between videos (px)</Label>
+                      <Input
+                        type="number" min={0}
+                        value={vs.padding}
+                        className="w-28 h-8 text-sm"
+                        onChange={(e) => {
+                          const v = Math.max(0, parseInt(e.target.value) || 0);
+                          updateSetLocally(vs.id, { padding: v });
+                        }}
+                        onBlur={() => patchSet(vs.id, { padding: vs.padding })}
+                      />
+                    </div>
+
+                    {/* Scale */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Output size</Label>
+                      <div className="flex rounded-md border border-zinc-200 overflow-hidden">
+                        {([false, true] as const).map((keep) => (
+                          <button
+                            key={String(keep)}
+                            onClick={() => {
+                              updateSetLocally(vs.id, { keepOriginalSize: keep });
+                              patchSet(vs.id, { keepOriginalSize: keep });
+                            }}
+                            className={`px-3 py-1.5 text-xs font-medium transition-colors
+                              ${vs.keepOriginalSize === keep
+                                ? "bg-zinc-900 text-white"
+                                : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                          >
+                            {keep ? "Original size" : "Scale to 640×360"}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                ))}
-                {vs.videos.length < 5 && (
-                  <button
-                    onClick={() => openModelNameDialog(vs.id)}
-                    disabled={uploading === vs.id}
-                    className="rounded-lg border-2 border-dashed border-zinc-300 flex flex-col items-center justify-center aspect-video text-zinc-400 hover:border-zinc-500 hover:text-zinc-600 transition-colors disabled:opacity-50"
-                  >
-                    <span className="text-2xl">+</span>
-                    <span className="text-xs mt-1">{uploading === vs.id ? "Uploading…" : "Add video"}</span>
-                  </button>
-                )}
-              </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {sets.length === 0 && <p className="text-zinc-400 text-sm">No video sets yet. Click "Add Video Set" above.</p>}
+        </div>
 
-              {/* Composite settings */}
-              <div className="border-t pt-3">
-                <p className="text-xs font-medium text-zinc-500 mb-3">Composite settings</p>
-                <div className="flex flex-wrap items-end gap-4">
-                  {/* Stacking direction */}
-                  <div className="space-y-1">
-                    <Label className="text-xs">Stacking</Label>
-                    <div className="flex rounded-md border border-zinc-200 overflow-hidden">
-                      {(["horizontal", "vertical"] as const).map((dir) => (
-                        <button
-                          key={dir}
-                          onClick={() => {
-                            updateSetLocally(vs.id, { layout: dir });
-                            patchSet(vs.id, { layout: dir });
-                          }}
-                          className={`px-3 py-1.5 text-xs font-medium transition-colors
-                            ${vs.layout === dir
-                              ? "bg-zinc-900 text-white"
-                              : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
-                        >
-                          {dir === "horizontal" ? "⬛▬ Side by side" : "☰ Stacked"}
-                        </button>
+        {/* Right: preview sidebar */}
+        {setsWithVideos.length > 0 && (
+          <div className="xl:sticky xl:top-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-zinc-700">Composite Previews</p>
+              {generatingPreviews && (
+                <span className="text-xs text-zinc-400 animate-pulse">Generating…</span>
+              )}
+            </div>
+
+            {sets.map((vs) => {
+              if (vs.videos.length === 0) return null;
+              return (
+                <div key={vs.id} className="rounded-lg border bg-white overflow-hidden">
+                  <div className="px-3 py-2 border-b bg-zinc-50 flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-zinc-700 truncate">{vs.name}</span>
+                    <div className="flex gap-1 shrink-0">
+                      {vs.videos.map((_, i) => (
+                        <span key={i} className="text-xs bg-zinc-200 text-zinc-600 rounded px-1 font-mono">
+                          {SLOT_LABELS[i]}
+                        </span>
                       ))}
                     </div>
                   </div>
-
-                  {/* Crop X */}
-                  <div className="space-y-1">
-                    <Label className="text-xs">Crop left (px)</Label>
-                    <Input
-                      type="number" min={0}
-                      value={vs.cropX}
-                      className="w-24 h-8 text-sm"
-                      onChange={(e) => {
-                        const v = Math.max(0, parseInt(e.target.value) || 0);
-                        updateSetLocally(vs.id, { cropX: v });
-                      }}
-                      onBlur={() => patchSet(vs.id, { cropX: vs.cropX })}
-                    />
-                  </div>
-
-                  {/* Crop Y */}
-                  <div className="space-y-1">
-                    <Label className="text-xs">Crop top (px)</Label>
-                    <Input
-                      type="number" min={0}
-                      value={vs.cropY}
-                      className="w-24 h-8 text-sm"
-                      onChange={(e) => {
-                        const v = Math.max(0, parseInt(e.target.value) || 0);
-                        updateSetLocally(vs.id, { cropY: v });
-                      }}
-                      onBlur={() => patchSet(vs.id, { cropY: vs.cropY })}
-                    />
-                  </div>
-
-                  {/* Padding */}
-                  <div className="space-y-1">
-                    <Label className="text-xs">Gap between videos (px)</Label>
-                    <Input
-                      type="number" min={0}
-                      value={vs.padding}
-                      className="w-28 h-8 text-sm"
-                      onChange={(e) => {
-                        const v = Math.max(0, parseInt(e.target.value) || 0);
-                        updateSetLocally(vs.id, { padding: v });
-                      }}
-                      onBlur={() => patchSet(vs.id, { padding: vs.padding })}
-                    />
-                  </div>
-
-                  {/* Scale */}
-                  <div className="space-y-1">
-                    <Label className="text-xs">Output size</Label>
-                    <div className="flex rounded-md border border-zinc-200 overflow-hidden">
-                      {([false, true] as const).map((keep) => (
-                        <button
-                          key={String(keep)}
-                          onClick={() => {
-                            updateSetLocally(vs.id, { keepOriginalSize: keep });
-                            patchSet(vs.id, { keepOriginalSize: keep });
-                          }}
-                          className={`px-3 py-1.5 text-xs font-medium transition-colors
-                            ${vs.keepOriginalSize === keep
-                              ? "bg-zinc-900 text-white"
-                              : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
-                        >
-                          {keep ? "Original size" : "Scale to 640×360"}
-                        </button>
-                      ))}
+                  {generatingPreviews ? (
+                    <div className="aspect-video bg-zinc-100 flex items-center justify-center">
+                      <span className="text-xs text-zinc-400 animate-pulse">Generating…</span>
                     </div>
-                  </div>
+                  ) : vs.testCompositeUrl ? (
+                    <video
+                      key={vs.testCompositeUrl}
+                      src={vs.testCompositeUrl}
+                      controls
+                      className="w-full"
+                    />
+                  ) : (
+                    <div className="aspect-video bg-zinc-50 flex items-center justify-center">
+                      <span className="text-xs text-zinc-400">No preview — click Generate Previews</span>
+                    </div>
+                  )}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {sets.length === 0 && <p className="text-zinc-400 text-sm">No video sets yet. Click "Add Video Set" above.</p>}
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Model name dialog for new upload */}

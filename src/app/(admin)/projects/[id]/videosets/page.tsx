@@ -189,21 +189,10 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
         <h1 className="text-2xl font-bold text-zinc-900">Video Sets</h1>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-zinc-500 text-sm">
-          Each video set contains outputs from different models for the same prompt (up to 5 videos).
-          Composite settings (stacking, crop, padding) apply to all videos in the set.
-        </p>
-        {sets.length > 0 && (
-          <span className="text-sm font-medium text-zinc-600 shrink-0 ml-6">
-            Sampling from{" "}
-            <span className={sets.filter(s => !s.disabled).length === 0 ? "text-red-600" : "text-zinc-900"}>
-              {sets.filter(s => !s.disabled).length}
-            </span>
-            /{sets.length} video sets
-          </span>
-        )}
-      </div>
+      <p className="text-zinc-500 text-sm">
+        Each video set contains outputs from different models for the same prompt (up to 5 videos).
+        Composite settings (stacking, crop, padding) apply to all videos in the set.
+      </p>
 
       <div className="flex items-center gap-3">
         <Button onClick={createSet} disabled={creating}>
@@ -217,6 +206,15 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
           >
             {generatingPreviews ? "Generating previews…" : "Generate Previews"}
           </Button>
+        )}
+        {sets.length > 0 && (
+          <span className="text-sm text-zinc-500">
+            Sampling from{" "}
+            <span className={`font-medium ${sets.filter(s => !s.disabled).length === 0 ? "text-red-600" : "text-zinc-900"}`}>
+              {sets.filter(s => !s.disabled).length}
+            </span>
+            /{sets.length} video sets
+          </span>
         )}
       </div>
 

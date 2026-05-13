@@ -23,8 +23,11 @@ type FlatPage =
   | { kind: "static"; page: BuilderPage }
   | { kind: "video"; page: BuilderPage; videoSet: RunnerVideoSet };
 
-// Response store: elementId → value (for non-video); or `${elementId}::${slot}` → value (for video)
+// Response store: elementId → value (for non-video); or `${surveyVideoSetId}::${elementId}::${slot}` → value (for video)
 type ResponseMap = Record<string, string>;
+
+type SurveyProgress = { token: string; pageIndex: number; responses: ResponseMap };
+const storageKey = (slug: string) => `survey-progress-${slug}`;
 
 export default function SurveyRunner({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -37,27 +40,54 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Step 1: create session
+  // Step 1: restore from localStorage or create a new session
   useEffect(() => {
+    const stored = localStorage.getItem(storageKey(slug));
+    if (stored) {
+      try {
+        const progress = JSON.parse(stored) as SurveyProgress;
+        setToken(progress.token);
+        setPageIndex(progress.pageIndex);
+        setResponses(progress.responses);
+        return; // Step 2 will load session data using the restored token
+      } catch {
+        localStorage.removeItem(storageKey(slug));
+      }
+    }
+
+    // No stored progress — create a new session
     fetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ slug }),
     }).then(async (r) => {
       const d = await r.json();
-      if (d.token) setToken(d.token);
-      else if (r.status === 410) setError("This survey has been disabled by the owner. Please contact the form owner.");
-      else setError("This survey is not available.");
+      if (d.token) {
+        setToken(d.token);
+      } else if (r.status === 410) {
+        setError("This survey has been disabled by the owner. Please contact the form owner.");
+      } else {
+        setError("This survey is not available.");
+      }
     }).catch(() => setError("Failed to load survey."));
   }, [slug]);
 
-  // Step 2: load session data
+  // Step 2: load session data from DB (also validates the token is still alive)
   useEffect(() => {
     if (!token) return;
-    fetch(`/api/sessions/${token}`).then((r) => r.json()).then((s: RunnerSession) => {
+    fetch(`/api/sessions/${token}`).then(async (r) => {
+      if (!r.ok) {
+        // Stale token (survey deleted, DB reset, etc.) — clear storage and restart
+        localStorage.removeItem(storageKey(slug));
+        setToken(null);
+        setPageIndex(0);
+        setResponses({});
+        setError("Your previous session has expired. Please refresh to start a new survey.");
+        return;
+      }
+      const s: RunnerSession = await r.json();
       setSession(s);
-      // Build flat page list — skip pages with no elements so an empty
-      // "after" section does not create a blank terminal page.
+
       const nonEmpty = (p: BuilderPage) => p.elements.length > 0;
 
       const beforePages = s.survey.template.pages
@@ -80,9 +110,19 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         .sort((a, b) => a.orderIndex - b.orderIndex)
         .map((p): FlatPage => ({ kind: "static", page: p }));
 
-      setFlatPages([...beforePages, ...videoPages, ...afterPages]);
+      const built = [...beforePages, ...videoPages, ...afterPages];
+      setFlatPages(built);
+
+      // Clamp restored pageIndex in case the survey structure changed since last visit
+      setPageIndex((prev) => Math.min(prev, Math.max(0, built.length - 1)));
     });
   }, [token]);
+
+  // Persist progress to localStorage on every change (except after final submit)
+  useEffect(() => {
+    if (!token || done) return;
+    localStorage.setItem(storageKey(slug), JSON.stringify({ token, pageIndex, responses }));
+  }, [token, pageIndex, responses, done]);
 
   function setResponse(key: string, val: string) {
     setResponses((prev) => ({ ...prev, [key]: val }));
@@ -98,7 +138,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   }
 
   const currentFlat = flatPages[pageIndex];
-  const progress = flatPages.length > 0 ? Math.round(((pageIndex) / flatPages.length) * 100) : 0;
+  const progress = flatPages.length > 0 ? Math.round((pageIndex / flatPages.length) * 100) : 0;
 
   // Validate current page — all required elements answered
   function validatePage(): boolean {
@@ -111,8 +151,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
       if (type === "videoset_block") continue;
 
       if (type === "consent") {
-        const val = responses[el.id] ?? "";
-        if (!val) return false;
+        if (!responses[el.id]) return false;
       } else if (type === "demographics") {
         const c = el.config as DemographicsConfig;
         const vals = parseDemoValues(responses[el.id]);
@@ -125,46 +164,37 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         }
       } else if (type === "video_preference" && videoSet) {
         if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`]) return false;
-      } else if (type === "short_answer" || type === "single_choice") {
-        // optional — skip validation
       }
     }
     return true;
   }
 
-  async function savePageResponses() {
-    if (!token || !currentFlat) return;
-    const page = currentFlat.page;
-    const videoSet = currentFlat.kind === "video" ? currentFlat.videoSet : null;
+  // Build the complete response payload from all accumulated responses across all pages
+  function buildAllResponses(): Array<{ surveyVideoSetId?: string; elementId: string; slotLabel?: string; value: string }> {
+    const payload: Array<{ surveyVideoSetId?: string; elementId: string; slotLabel?: string; value: string }> = [];
 
-    const payload: Array<{
-      surveyVideoSetId?: string; elementId: string; slotLabel?: string; value: string;
-    }> = [];
+    for (const flat of flatPages) {
+      const page = flat.page;
+      const videoSet = flat.kind === "video" ? flat.videoSet : null;
 
-    for (const el of page.elements) {
-      if (el.elementType === "videoset_block") continue;
+      for (const el of page.elements) {
+        if (el.elementType === "videoset_block") continue;
 
-      if (el.elementType === "video_likert" && videoSet) {
-        for (const slot of videoSet.slots) {
-          const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`];
-          if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: slot, value: val });
+        if (el.elementType === "video_likert" && videoSet) {
+          for (const slot of videoSet.slots) {
+            const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`];
+            if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: slot, value: val });
+          }
+        } else if (el.elementType === "video_preference" && videoSet) {
+          const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`];
+          if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: val, value: val });
+        } else {
+          const val = responses[el.id];
+          if (val) payload.push({ elementId: el.id, value: val });
         }
-      } else if (el.elementType === "video_preference" && videoSet) {
-        const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`];
-        if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: val, value: val });
-      } else {
-        const val = responses[el.id];
-        if (val) payload.push({ elementId: el.id, value: val });
       }
     }
-
-    if (payload.length > 0) {
-      await fetch("/api/responses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, responses: payload }),
-      });
-    }
+    return payload;
   }
 
   // Set browser title once template name is known
@@ -183,13 +213,24 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
       return;
     }
     setSubmitting(true);
-    await savePageResponses();
+
     if (pageIndex + 1 >= flatPages.length) {
+      // Final submit: POST all accumulated responses then mark session complete
+      const payload = buildAllResponses();
+      if (payload.length > 0) {
+        await fetch("/api/responses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, responses: payload }),
+        });
+      }
       await fetch(`/api/sessions/${token}`, { method: "PATCH" });
+      localStorage.removeItem(storageKey(slug));
       setDone(true);
     } else {
       setPageIndex((i) => i + 1);
     }
+
     setSubmitting(false);
   }
 
@@ -353,11 +394,22 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
           </CardContent>
         </Card>
 
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-zinc-400">Page {pageIndex + 1} of {flatPages.length}</span>
-          <Button onClick={next} disabled={submitting} size="lg">
-            {submitting ? "Saving…" : pageIndex + 1 === flatPages.length ? "Submit" : "Next →"}
-          </Button>
+        <div className="grid grid-cols-3 items-center">
+          <div>
+            {pageIndex > 0 && (
+              <Button variant="ghost" onClick={() => setPageIndex((i) => i - 1)} disabled={submitting}>
+                ← Back
+              </Button>
+            )}
+          </div>
+          <span className="text-sm text-zinc-400 text-center">
+            Page {pageIndex + 1} of {flatPages.length}
+          </span>
+          <div className="flex justify-end">
+            <Button onClick={next} disabled={submitting} size="lg">
+              {submitting ? "Saving…" : pageIndex + 1 === flatPages.length ? "Submit" : "Next →"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

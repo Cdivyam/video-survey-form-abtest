@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, use } from "react";
+import { useEffect, useRef, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -39,6 +39,8 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Set<string>>(new Set());
+  const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Step 1: restore from localStorage or create a new session
   useEffect(() => {
@@ -140,33 +142,32 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   const currentFlat = flatPages[pageIndex];
   const progress = flatPages.length > 0 ? Math.round((pageIndex / flatPages.length) * 100) : 0;
 
-  // Validate current page — all required elements answered
-  function validatePage(): boolean {
-    if (!currentFlat) return true;
+  // Returns the set of error keys for the current page (empty = all valid).
+  // Key format: el.id for static elements, surveyVideoSetId::el.id for video elements.
+  function getValidationErrors(): Set<string> {
+    const errors = new Set<string>();
+    if (!currentFlat) return errors;
     const page = currentFlat.page;
     const videoSet = currentFlat.kind === "video" ? currentFlat.videoSet : null;
 
     for (const el of page.elements) {
       const type = el.elementType;
       if (type === "videoset_block") continue;
+      const key = videoSet ? `${videoSet.surveyVideoSetId}::${el.id}` : el.id;
 
       if (type === "consent") {
-        if (!responses[el.id]) return false;
+        if (!responses[el.id]) errors.add(key);
       } else if (type === "demographics") {
         const c = el.config as DemographicsConfig;
         const vals = parseDemoValues(responses[el.id]);
-        for (const field of c.fields) {
-          if (field.required && !vals[field.id]) return false;
-        }
+        if (c.fields.some((f) => f.required && !vals[f.id])) errors.add(key);
       } else if (type === "video_likert" && videoSet) {
-        for (const slot of videoSet.slots) {
-          if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`]) return false;
-        }
+        if (videoSet.slots.some((s) => !responses[`${videoSet.surveyVideoSetId}::${el.id}::${s}`])) errors.add(key);
       } else if (type === "video_preference" && videoSet) {
-        if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`]) return false;
+        if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`]) errors.add(key);
       }
     }
-    return true;
+    return errors;
   }
 
   // Build the complete response payload from all accumulated responses across all pages
@@ -208,10 +209,15 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   }, [pageIndex]);
 
   async function next() {
-    if (!validatePage()) {
-      alert("Please answer all required questions before continuing.");
+    const errors = getValidationErrors();
+    if (errors.size > 0) {
+      setValidationErrors(errors);
+      if (validationTimer.current) clearTimeout(validationTimer.current);
+      validationTimer.current = setTimeout(() => setValidationErrors(new Set()), 10000);
       return;
     }
+    // Clear any lingering errors on successful advance
+    setValidationErrors(new Set());
     setSubmitting(true);
 
     if (pageIndex + 1 >= flatPages.length) {
@@ -388,9 +394,19 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
                 </div>
               </div>
             )}
-            {currentFlat?.page.elements.map((el) => (
-              <div key={el.id}>{renderElement(el, videoSet)}</div>
-            ))}
+            {currentFlat?.page.elements.map((el) => {
+              const errKey = videoSet ? `${videoSet.surveyVideoSetId}::${el.id}` : el.id;
+              const hasError = validationErrors.has(errKey);
+              return (
+                <div key={el.id}
+                  className={hasError ? "rounded-lg ring-2 ring-red-400 p-3 -mx-3" : ""}>
+                  {renderElement(el, videoSet)}
+                  {hasError && (
+                    <p className="text-xs text-red-500 mt-2">Required field</p>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
 

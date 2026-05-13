@@ -23,10 +23,14 @@ export async function GET(
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const body = await req.json().catch(() => ({})) as { manualSetIds?: string[] };
+  const manualSetIds: string[] | undefined = Array.isArray(body.manualSetIds) && body.manualSetIds.length > 0
+    ? body.manualSetIds
+    : undefined;
 
   const template = await prisma.surveyTemplate.findFirst({
     where: { projectId: id },
@@ -71,25 +75,39 @@ export async function POST(
     );
   }
 
-  const completionCounts = await prisma.surveyVideoSet.groupBy({
-    by: ["videoSetId"],
-    where: {
-      survey: { projectId: id, status: "ready" },
-      compositeStatus: "ready",
-    },
-    _count: { id: true },
-  });
-  const countMap = Object.fromEntries(
-    completionCounts.map((c: { videoSetId: string; _count: { id: number } }) => [c.videoSetId, c._count.id])
-  );
+  let sampled: SetWithVideos[];
 
-  // Separate sampling weight data from full set data
-  const weightedForSampling = allSets.map((s) => ({
-    id: s.id,
-    completionCount: (countMap[s.id] as number) ?? 0,
-  }));
-  const sampledIds = weightedSample(weightedForSampling, template.setsPerSurvey).map((s) => s.id);
-  const sampled = sampledIds.map((id) => allSets.find((s) => s.id === id)!);
+  if (manualSetIds) {
+    // Manual selection: validate all provided IDs are enabled sets for this project
+    const found = manualSetIds.map((sid) => allSets.find((s) => s.id === sid)).filter(Boolean) as SetWithVideos[];
+    if (found.length !== template.setsPerSurvey) {
+      await prisma.survey.delete({ where: { id: survey.id } });
+      return NextResponse.json(
+        { error: `Manual selection must contain exactly ${template.setsPerSurvey} enabled video set(s).` },
+        { status: 400 }
+      );
+    }
+    sampled = found;
+  } else {
+    // Random: weighted sampling (prefer under-shown sets)
+    const completionCounts = await prisma.surveyVideoSet.groupBy({
+      by: ["videoSetId"],
+      where: {
+        survey: { projectId: id, status: "ready" },
+        compositeStatus: "ready",
+      },
+      _count: { id: true },
+    });
+    const countMap = Object.fromEntries(
+      completionCounts.map((c: { videoSetId: string; _count: { id: number } }) => [c.videoSetId, c._count.id])
+    );
+    const weightedForSampling = allSets.map((s) => ({
+      id: s.id,
+      completionCount: (countMap[s.id] as number) ?? 0,
+    }));
+    const sampledIds = weightedSample(weightedForSampling, template.setsPerSurvey).map((s) => s.id);
+    sampled = sampledIds.map((sid) => allSets.find((s) => s.id === sid)!);
+  }
 
   // Create SurveyVideoSet rows
   const svs = await Promise.all(

@@ -9,10 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 type Video = { id: string; modelName: string; fileUrl: string; orderIndex: number };
-type VideoSet = { id: string; name: string; videos: Video[] };
+type VideoSet = { id: string; name: string; disabled: boolean; videos: Video[] };
 type Survey = {
   id: string; slug: string; status: string; createdAt: string;
   _count: { sessions: number };
@@ -35,6 +36,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [project, setProject] = useState<Project | null>(null);
   const [generating, setGenerating] = useState(false);
   const [pollingId, setPollingId] = useState<string | null>(null);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generateMode, setGenerateMode] = useState<"random" | "manual">("random");
+  const [manualSelected, setManualSelected] = useState<VideoSet[]>([]);
 
   const [surveyToDelete, setSurveyToDelete] = useState<Survey | null>(null);
   const [videoSetToDelete, setVideoSetToDelete] = useState<VideoSet | null>(null);
@@ -65,11 +69,25 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     return () => clearInterval(interval);
   }, [pollingId]);
 
-  async function generateSurvey() {
+  function openGenerateModal() {
+    setGenerateMode("random");
+    setManualSelected([]);
+    setShowGenerateModal(true);
+  }
+
+  async function confirmGenerate() {
     setGenerating(true);
-    const res = await fetch(`/api/projects/${id}/surveys`, { method: "POST" });
+    const body = generateMode === "manual"
+      ? { manualSetIds: manualSelected.map((s) => s.id) }
+      : {};
+    const res = await fetch(`/api/projects/${id}/surveys`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (res.ok) {
       toast.success("Survey generation started");
+      setShowGenerateModal(false);
       load();
     } else {
       const err = await res.json();
@@ -186,7 +204,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <TabsContent value="surveys" className="space-y-4 mt-4">
           <div className="flex justify-between items-center">
             <p className="text-zinc-500 text-sm">Each generated survey gets a unique link.</p>
-            <Button onClick={generateSurvey} disabled={generating || !template}>
+            <Button
+              onClick={() => template && template.setsPerSurvey > 0 ? openGenerateModal() : confirmGenerate()}
+              disabled={generating || !template}
+            >
               {generating ? "Generating…" : "Generate Survey"}
             </Button>
           </div>
@@ -296,6 +317,117 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         onConfirm={confirmDeleteVideoSet}
         loading={deleting}
       />
+
+      {/* ── Generate survey modal ── */}
+      {template && template.setsPerSurvey > 0 && (() => {
+        const enabledSets = project.videoSets.filter((s) => !s.disabled);
+        const availableSets = enabledSets.filter((s) => !manualSelected.some((m) => m.id === s.id));
+        const needed = template.setsPerSurvey;
+        const canGenerate = generateMode === "random" || manualSelected.length === needed;
+
+        return (
+          <Dialog open={showGenerateModal} onOpenChange={(open) => { if (!open) setShowGenerateModal(false); }}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Generate Survey</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4 py-2">
+                <p className="text-sm text-zinc-500">
+                  This survey will include <strong>{needed}</strong> video set{needed !== 1 ? "s" : ""}.
+                </p>
+
+                {/* Mode radios */}
+                <div className="space-y-3">
+                  {(["random", "manual"] as const).map((mode) => (
+                    <label key={mode} className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={generateMode === mode}
+                        onChange={() => { setGenerateMode(mode); setManualSelected([]); }}
+                        className="accent-zinc-900 mt-0.5"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-zinc-900">
+                          {mode === "random" ? "Random" : "Manual selection"}
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          {mode === "random"
+                            ? "Video sets sampled automatically, preferring under-shown sets"
+                            : "Choose exactly which video sets to include"}
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Manual selection UI */}
+                {generateMode === "manual" && (
+                  <div className="space-y-3 border-t pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-zinc-500">Select {needed} video set{needed !== 1 ? "s" : ""}</span>
+                      <span className={`text-xs font-medium ${manualSelected.length === needed ? "text-green-600" : "text-zinc-400"}`}>
+                        {manualSelected.length} / {needed} selected
+                      </span>
+                    </div>
+
+                    {/* Dropdown */}
+                    {manualSelected.length < needed && (
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const vs = availableSets.find((s) => s.id === e.target.value);
+                          if (vs) setManualSelected((prev) => [...prev, vs]);
+                          e.target.value = "";
+                        }}
+                        className="w-full border border-zinc-200 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                      >
+                        <option value="" disabled>Select a video set…</option>
+                        {availableSets.map((vs) => (
+                          <option key={vs.id} value={vs.id}>
+                            {vs.name} ({vs.videos.length} video{vs.videos.length !== 1 ? "s" : ""})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {availableSets.length === 0 && manualSelected.length < needed && (
+                      <p className="text-xs text-amber-600">No more enabled video sets available.</p>
+                    )}
+
+                    {/* Selected pills */}
+                    {manualSelected.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {manualSelected.map((vs) => (
+                          <div key={vs.id}
+                            className="flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-full border border-zinc-200 bg-zinc-50">
+                            <span className="text-zinc-700">{vs.name}</span>
+                            <button
+                              onClick={() => setManualSelected((prev) => prev.filter((s) => s.id !== vs.id))}
+                              className="text-zinc-400 hover:text-red-500 transition-colors leading-none"
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter>
+                <button
+                  onClick={() => setShowGenerateModal(false)}
+                  className="px-4 py-2 text-sm rounded-md border border-zinc-200 hover:bg-zinc-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <Button onClick={confirmGenerate} disabled={generating || !canGenerate}>
+                  {generating ? "Generating…" : "Generate Survey"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }

@@ -14,7 +14,7 @@ export async function GET(
       surveys: {
         orderBy: { createdAt: "desc" },
         include: {
-          _count: { select: { sessions: true } },
+          _count: { select: { sessions: { where: { completedAt: { not: null } } } } },
           surveyVideoSets: {
             orderBy: { positionIndex: "asc" },
             select: {

@@ -47,11 +47,14 @@ export async function GET(
       });
     }
 
-    const webStream = Readable.toWeb(
-      fs.createReadStream(filePath, { start, end })
-    ) as ReadableStream;
+    const nodeStream = fs.createReadStream(filePath, { start, end });
+    // Suppress "Controller is already closed" noise when the browser aborts
+    // a range request mid-stream (seeking, navigation, player preload races).
+    nodeStream.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code !== "ERR_INVALID_STATE") console.error("[files]", err);
+    });
 
-    return new NextResponse(webStream, {
+    return new NextResponse(Readable.toWeb(nodeStream) as ReadableStream, {
       status: 206,
       headers: {
         "Content-Range": `bytes ${start}-${end}/${fileSize}`,
@@ -63,11 +66,12 @@ export async function GET(
     });
   }
 
-  const webStream = Readable.toWeb(
-    fs.createReadStream(filePath)
-  ) as ReadableStream;
+  const nodeStream = fs.createReadStream(filePath);
+  nodeStream.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code !== "ERR_INVALID_STATE") console.error("[files]", err);
+  });
 
-  return new NextResponse(webStream, {
+  return new NextResponse(Readable.toWeb(nodeStream) as ReadableStream, {
     status: 200,
     headers: {
       "Content-Length": String(fileSize),

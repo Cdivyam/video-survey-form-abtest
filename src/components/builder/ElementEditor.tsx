@@ -96,9 +96,12 @@ export default function ElementEditor({ element, onChange, videosetBlocks = [] }
 
     case "consent":
       return (
-        <div className="space-y-1">
-          <Label>Consent text</Label>
-          <Textarea rows={2} value={String(cfg.text ?? "")} onChange={(e) => patch({ text: e.target.value })} />
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label>Consent text</Label>
+            <Textarea rows={2} value={String(cfg.text ?? "")} onChange={(e) => patch({ text: e.target.value })} />
+          </div>
+          <p className="text-xs text-zinc-400">Respondent must check "I agree" to proceed. Always required.</p>
         </div>
       );
 

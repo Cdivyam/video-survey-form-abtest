@@ -10,17 +10,14 @@ type Props = {
 
 export default function ConsentEl({ config, value, onChange }: Props) {
   return (
-    <div className="space-y-3">
-      <p className="text-zinc-700">{config.text}</p>
-      <div className="flex flex-col gap-2">
-        {["I agree", "I do not agree"].map((opt) => (
-          <label key={opt} className="flex items-center gap-3 cursor-pointer">
-            <input type="radio" name="consent" value={opt} checked={value === opt}
-              onChange={() => onChange(opt)} className="accent-zinc-900" />
-            <span className="text-zinc-700">{opt}</span>
-          </label>
-        ))}
-      </div>
-    </div>
+    <label className="flex items-start gap-3 cursor-pointer">
+      <input
+        type="checkbox"
+        checked={value === "I agree"}
+        onChange={(e) => onChange(e.target.checked ? "I agree" : "")}
+        className="accent-zinc-900 mt-1 w-4 h-4 shrink-0"
+      />
+      <span className="text-zinc-700">{config.text}</span>
+    </label>
   );
 }

@@ -57,11 +57,19 @@ export async function POST(
     videos: { id: string; fileUrl: string }[];
   };
 
-  // Fetch all videosets with completion counts
+  // Fetch only enabled videosets for sampling
   const allSets: SetWithVideos[] = await prisma.videoSet.findMany({
-    where: { projectId: id },
+    where: { projectId: id, disabled: false },
     include: { videos: { orderBy: { orderIndex: "asc" } } },
   });
+
+  if (allSets.length < template.setsPerSurvey) {
+    await prisma.survey.delete({ where: { id: survey.id } });
+    return NextResponse.json(
+      { error: `Not enough enabled video sets. Need ${template.setsPerSurvey}, found ${allSets.length}.` },
+      { status: 400 }
+    );
+  }
 
   const completionCounts = await prisma.surveyVideoSet.groupBy({
     by: ["videoSetId"],

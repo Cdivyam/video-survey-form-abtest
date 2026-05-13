@@ -44,6 +44,10 @@ export async function PATCH(
     data.keepOriginalSize = Boolean(body.keepOriginalSize);
   }
 
+  if (body.disabled !== undefined) {
+    data.disabled = Boolean(body.disabled);
+  }
+
   // Crop validation — must be non-negative and not exceed video dimensions
   const newCropX = body.cropX !== undefined ? parseInt(String(body.cropX), 10) : undefined;
   const newCropY = body.cropY !== undefined ? parseInt(String(body.cropY), 10) : undefined;

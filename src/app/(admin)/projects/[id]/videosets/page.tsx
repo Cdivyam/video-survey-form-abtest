@@ -21,6 +21,7 @@ type Video = {
 type VideoSet = {
   id: string;
   name: string;
+  disabled: boolean;
   layout: "horizontal" | "vertical";
   cropX: number;
   cropY: number;
@@ -106,7 +107,7 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
     setGeneratingPreviews(false);
   }
 
-  async function patchSet(setId: string, patch: Partial<Pick<VideoSet, "layout" | "cropX" | "cropY" | "padding" | "keepOriginalSize">>) {
+  async function patchSet(setId: string, patch: Partial<Pick<VideoSet, "disabled" | "layout" | "cropX" | "cropY" | "padding" | "keepOriginalSize">>) {
     const res = await fetch(`/api/videosets/${setId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -219,11 +220,31 @@ export default function VideoSetsPage({ params }: { params: Promise<{ id: string
           <React.Fragment key={vs.id}>
 
             {/* Left column: VideoSet card */}
-            <Card>
+            <Card className={vs.disabled ? "opacity-60" : ""}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{vs.name}</CardTitle>
                   <div className="flex items-center gap-2">
+                    <CardTitle className="text-base">{vs.name}</CardTitle>
+                    {vs.disabled && (
+                      <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                        Disabled
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        updateSetLocally(vs.id, { disabled: !vs.disabled });
+                        patchSet(vs.id, { disabled: !vs.disabled });
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors
+                        ${vs.disabled
+                          ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100"
+                          : "border-zinc-200 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50"}`}
+                      title={vs.disabled ? "Enable for survey generation" : "Exclude from survey generation"}
+                    >
+                      {vs.disabled ? "Enable" : "Disable"}
+                    </button>
                     <Button
                       variant="ghost" size="sm"
                       className="text-zinc-500 hover:text-zinc-800"

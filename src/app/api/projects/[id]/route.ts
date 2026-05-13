@@ -15,7 +15,14 @@ export async function GET(
         orderBy: { createdAt: "desc" },
         include: {
           _count: { select: { sessions: true } },
-          surveyVideoSets: { select: { compositeStatus: true } },
+          surveyVideoSets: {
+            orderBy: { positionIndex: "asc" },
+            select: {
+              compositeStatus: true,
+              positionIndex: true,
+              videoSet: { select: { id: true, name: true, disabled: true } },
+            },
+          },
         },
       },
     },

@@ -26,6 +26,7 @@ model VideoSet {
   id        String   @id @default(cuid())
   projectId String
   name      String
+  disabled         Boolean  @default(false)         // excluded from new survey generation when true
   layout           String   @default("horizontal") // "horizontal" | "vertical"
   cropX            Int      @default(0)
   cropY            Int      @default(0)

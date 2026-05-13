@@ -16,7 +16,11 @@ type VideoSet = { id: string; name: string; videos: Video[] };
 type Survey = {
   id: string; slug: string; status: string; createdAt: string;
   _count: { sessions: number };
-  surveyVideoSets?: { compositeStatus: string }[];
+  surveyVideoSets?: {
+    compositeStatus: string;
+    positionIndex: number;
+    videoSet: { id: string; name: string; disabled: boolean };
+  }[];
 };
 type Project = {
   id: string; name: string;
@@ -224,6 +228,22 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                         <div className="space-y-1">
                           <Progress value={pct} className="h-2" />
                           <p className="text-xs text-zinc-400">Rendering composites: {ready}/{total}</p>
+                        </div>
+                      )}
+                      {svs.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          <span className="text-xs text-zinc-400">Sampled:</span>
+                          {svs.map((v, i) => (
+                            <span key={i}
+                              className={`text-xs px-2 py-0.5 rounded-full border font-medium
+                                ${v.videoSet.disabled
+                                  ? "border-amber-200 bg-amber-50 text-amber-600"
+                                  : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}
+                              title={v.videoSet.disabled ? "This video set is now disabled" : undefined}
+                            >
+                              {v.videoSet.name}
+                            </span>
+                          ))}
                         </div>
                       )}
                       {s.status === "ready" && (

@@ -172,8 +172,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <p className="text-zinc-400 text-sm">No template yet.</p>
           )}
           {template && project.surveys.some((s) => s.status === "ready" || s.status === "generating") && (
-            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-              Saving edits to this template will <strong>disable all existing surveys</strong>. Responses already collected are preserved.
+            <p className="text-sm text-zinc-500 bg-zinc-50 border border-zinc-200 rounded-md px-3 py-2">
+              Text edits (prompts, labels, headings) apply instantly to existing surveys.
+              Adding or removing blocks will prompt you to confirm before disabling them.
             </p>
           )}
           <Button onClick={() => router.push(`/projects/${id}/template`)}>

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import ElementEditor from "@/components/builder/ElementEditor";
 import {
   ELEMENT_LABELS, VIDEO_ELEMENTS, GENERAL_ELEMENTS, defaultConfig, elementDisplayLabel,
@@ -68,6 +69,10 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const [activeSection, setActiveSection] = useState<PageSection>("before");
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmSave, setConfirmSave] = useState(false);
+  const [activeSurveyCount, setActiveSurveyCount] = useState(0);
+  // Snapshot of element IDs at load time — used to detect structural changes
+  const initialElementIds = useRef<Set<string>>(new Set());
 
   // Load existing template
   useEffect(() => {
@@ -75,6 +80,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
       if (!t) return;
       setName(t.name);
       setSetsPerSurvey(t.setsPerSurvey);
+      setActiveSurveyCount(t.activeSurveyCount ?? 0);
       if (t.pages?.length) {
         const mapped: BuilderPage[] = (["before", "dynamic", "after"] as PageSection[]).map((section) => {
           const page = t.pages.find((p: { section: string }) => p.section === section);
@@ -83,6 +89,8 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             : { id: nanoid(), section, orderIndex: 0, elements: [] };
         });
         setPages(mapped);
+        // Snapshot element IDs so we can detect structural changes before saving
+        initialElementIds.current = new Set(mapped.flatMap((p) => p.elements.map((e) => e.id)));
       }
     });
   }, [id]);
@@ -132,15 +140,39 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
     updatePage({ ...activePage, elements: reordered });
   }
 
-  async function save() {
+  function isStructuralChange(): boolean {
+    const current = new Set(pages.flatMap((p) => p.elements.map((e) => e.id)));
+    const initial = initialElementIds.current;
+    return [...current].some((id) => !initial.has(id)) || [...initial].some((id) => !current.has(id));
+  }
+
+  function handleSaveClick() {
+    if (activeSurveyCount > 0 && isStructuralChange()) {
+      setConfirmSave(true);
+    } else {
+      doSave();
+    }
+  }
+
+  async function doSave() {
+    setConfirmSave(false);
     setSaving(true);
     const res = await fetch(`/api/projects/${id}/template`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, setsPerSurvey, pages }),
     });
-    if (res.ok) { toast.success("Template saved"); router.push(`/projects/${id}`); }
-    else toast.error("Failed to save");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.surveysDisabled > 0) {
+        toast.success(`Template saved — ${data.surveysDisabled} survey${data.surveysDisabled !== 1 ? "s" : ""} disabled`);
+      } else {
+        toast.success("Template saved");
+      }
+      router.push(`/projects/${id}`);
+    } else {
+      toast.error("Failed to save");
+    }
     setSaving(false);
   }
 
@@ -165,7 +197,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           <Input type="number" min={0} value={setsPerSurvey}
             onChange={(e) => setSetsPerSurvey(Number(e.target.value))} className="w-32" />
         </div>
-        <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save template"}</Button>
+        <Button onClick={handleSaveClick} disabled={saving}>{saving ? "Saving…" : "Save template"}</Button>
       </div>
 
       <div className="flex gap-2">
@@ -236,6 +268,20 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={confirmSave}
+        onOpenChange={(open) => { if (!open) setConfirmSave(false); }}
+        title="Blocks have changed"
+        description={
+          <>
+            You have added or removed blocks. This will <strong>disable {activeSurveyCount} existing survey{activeSurveyCount !== 1 ? "s" : ""}</strong> — collected responses are preserved but the surveys will no longer be accessible to new respondents. Text-only changes never require this.
+          </>
+        }
+        confirmLabel="Save and disable surveys"
+        onConfirm={doSave}
+        loading={saving}
+      />
     </div>
   );
 }

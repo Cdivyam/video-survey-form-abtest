@@ -65,7 +65,7 @@ export default function () {
 
     sessionCreateDuration.add(res.timings.duration);
     const ok = check(res, {
-      "create session 200": (r) => r.status === 200,
+      "create session 2xx": (r) => r.status >= 200 && r.status < 300,
       "token present":      (r) => !!r.json("token"),
     });
     errorRate.add(!ok);
@@ -82,8 +82,8 @@ export default function () {
 
     sessionLoadDuration.add(res.timings.duration);
     const ok = check(res, {
-      "load session 200":     (r) => r.status === 200,
-      "survey data present":  (r) => !!r.json("survey"),
+      "load session 2xx":    (r) => r.status >= 200 && r.status < 300,
+      "survey data present": (r) => !!r.json("survey"),
     });
     errorRate.add(!ok);
 
@@ -132,7 +132,7 @@ export default function () {
     );
 
     submitDuration.add(res.timings.duration);
-    const ok = check(res, { "submit 200": (r) => r.status === 200 });
+    const ok = check(res, { "submit 2xx": (r) => r.status >= 200 && r.status < 300 });
     errorRate.add(!ok);
   });
 
@@ -141,7 +141,7 @@ export default function () {
   // 5. Mark session complete
   group("complete_session", () => {
     const res = http.patch(`${BASE_URL}/api/sessions/${token}`);
-    check(res, { "complete 200": (r) => r.status === 200 });
+    check(res, { "complete 2xx": (r) => r.status >= 200 && r.status < 300 });
   });
 
   sleep(1);

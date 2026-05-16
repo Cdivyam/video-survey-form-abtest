@@ -54,6 +54,7 @@ export const options = {
 export default function () {
   let token = null;
   let videoSets = [];
+  let pages = [];
 
   // 1. Create session
   group("create_session", () => {
@@ -87,7 +88,10 @@ export default function () {
     });
     errorRate.add(!ok);
 
-    if (ok) videoSets = res.json("survey.videoSets") || [];
+    if (ok) {
+      videoSets = res.json("survey.videoSets") || [];
+      pages = res.json("survey.template.pages") || [];
+    }
   });
 
   sleep(1);
@@ -114,20 +118,26 @@ export default function () {
 
   // 4. Submit responses
   group("submit_responses", () => {
-    // Build a minimal plausible payload; real values don't matter for load testing
+    // Build payload using real element IDs from the session
+    const videoElementIds = pages
+      .flatMap((p) => p.elements || [])
+      .filter((e) => e.elementType === "video_likert" || e.elementType === "video_preference")
+      .map((e) => e.id);
+
+    const responses = videoSets.flatMap((vs) =>
+      videoElementIds.flatMap((elementId) =>
+        vs.slots.map((slot) => ({
+          surveyVideoSetId: vs.surveyVideoSetId,
+          elementId,
+          slotLabel: slot,
+          value: "3",
+        }))
+      )
+    );
+
     const res = http.post(
       `${BASE_URL}/api/responses`,
-      JSON.stringify({
-        token,
-        responses: videoSets.flatMap((vs) =>
-          vs.slots.map((slot) => ({
-            surveyVideoSetId: vs.surveyVideoSetId,
-            elementId:        "load-test-element",
-            slotLabel:        slot,
-            value:            "3",
-          }))
-        ),
-      }),
+      JSON.stringify({ token, responses }),
       { headers: { "Content-Type": "application/json" } }
     );
 

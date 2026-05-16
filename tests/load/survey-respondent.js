@@ -32,8 +32,8 @@ const errorRate             = new Rate("errors");
 
 export const options = {
   stages: [
-    { duration: "30s", target: 5  },  // ramp up to 5 concurrent users
-    { duration: "1m",  target: 15 },  // ramp to 15 and hold
+    { duration: "30s", target: 10 },  // ramp up to 10 concurrent users
+    { duration: "1m",  target: 30 },  // ramp to 30 and hold
     { duration: "30s", target: 0  },  // ramp down
   ],
   thresholds: {

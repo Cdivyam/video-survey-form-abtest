@@ -44,6 +44,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [videoSetToDelete, setVideoSetToDelete] = useState<VideoSet | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [surveyToClear, setSurveyToClear] = useState<Survey | null>(null);
+  const [clearing, setClearing] = useState(false);
+
   async function load() {
     const res = await fetch(`/api/projects/${id}`);
     if (!res.ok) { router.push("/projects"); return; }
@@ -118,6 +121,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     await fetch(`/api/surveys/${surveyToDelete.id}`, { method: "DELETE" });
     setDeleting(false);
     setSurveyToDelete(null);
+    load();
+  }
+
+  async function confirmClearResponses() {
+    if (!surveyToClear) return;
+    setClearing(true);
+    await fetch(`/api/surveys/${surveyToClear.id}/responses`, { method: "DELETE" });
+    setClearing(false);
+    setSurveyToClear(null);
+    toast.success("Responses cleared");
     load();
   }
 
@@ -242,6 +255,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                               <Button variant="outline" size="sm">Export CSV</Button>
                             </a>
                           )}
+                          {s._count.sessions > 0 && (
+                            <Button variant="ghost" size="sm" className="text-amber-600 hover:text-amber-800"
+                              onClick={() => setSurveyToClear(s)}>Clear responses</Button>
+                          )}
                           <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700"
                             onClick={() => setSurveyToDelete(s)}>Delete</Button>
                         </div>
@@ -284,6 +301,23 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           )}
         </TabsContent>
       </Tabs>
+
+      {/* ── Clear responses ── */}
+      <ConfirmDialog
+        open={!!surveyToClear}
+        onOpenChange={(open) => { if (!open) setSurveyToClear(null); }}
+        title="Clear all responses"
+        description={
+          surveyToClear && (
+            <>
+              This will permanently delete all <strong>{surveyToClear._count.sessions} response{surveyToClear._count.sessions !== 1 ? "s" : ""}</strong> for this survey. The survey link stays active and can still receive new responses.
+            </>
+          )
+        }
+        confirmLabel="Clear responses"
+        onConfirm={confirmClearResponses}
+        loading={clearing}
+      />
 
       {/* ── Survey delete ── */}
       <ConfirmDialog

@@ -49,6 +49,7 @@ export type LikertConfig = {
 export type VideosetBlockConfig = {
   name: string; // display name; used as column reference in CSV export
   containerWidth: "33%" | "50%" | "75%" | "100%"; // max-width of video player within the left panel
+  layoutMode: "carousel" | "scroll"; // how associated questions are presented on the right panel
 };
 
 export type VideoLikertConfig = {

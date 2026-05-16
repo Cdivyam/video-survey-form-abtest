@@ -261,11 +261,45 @@ export default function ElementEditor({ element, onChange, videosetBlocks = [] }
 
     case "videoset_block": {
       const c = element.config as VideosetBlockConfig;
+      const WIDTH_PRESETS: { label: string; value: VideosetBlockConfig["containerWidth"] }[] = [
+        { label: "Small", value: "33%" },
+        { label: "Medium", value: "50%" },
+        { label: "Large", value: "75%" },
+        { label: "Full", value: "100%" },
+      ];
+      const currentWidth = c.containerWidth ?? "100%";
       return (
         <div className="space-y-3">
           <div className="space-y-1">
             <Label>Block name <span className="text-zinc-400 font-normal">(used as CSV reference)</span></Label>
             <Input value={c.name ?? ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g. Video Set Block" />
+          </div>
+          <div className="space-y-2">
+            <Label>
+              Container width <span className="text-zinc-400 font-normal">(within video panel)</span>
+            </Label>
+            <div className="flex gap-1">
+              {WIDTH_PRESETS.map(({ label, value }) => (
+                <button
+                  key={value}
+                  onClick={() => patch({ containerWidth: value })}
+                  className={`flex-1 py-1 text-xs rounded border transition-colors
+                    ${currentWidth === value
+                      ? "bg-zinc-900 text-white border-zinc-900"
+                      : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+                >
+                  {label}
+                  <span className="block text-[10px] opacity-70">{value}</span>
+                </button>
+              ))}
+            </div>
+            <div className="h-3 bg-zinc-100 rounded overflow-hidden">
+              <div
+                className="h-full bg-zinc-400 rounded transition-all duration-200"
+                style={{ width: currentWidth }}
+              />
+            </div>
+            <p className="text-[11px] text-zinc-400">Width is relative to the video panel, not the full screen.</p>
           </div>
           <div className="space-y-1">
             <Label className="text-zinc-400">Block ID <span className="font-normal">(read-only)</span></Label>

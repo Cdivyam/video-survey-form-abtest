@@ -16,18 +16,32 @@ import type {
   ConsentConfig, VideoLikertConfig, VideoPreferenceConfig,
   HeadingConfig, TextboxConfig, ShortAnswerConfig,
   SingleChoiceConfig, MultiChoiceConfig, LikertConfig,
-  DemographicsConfig,
+  DemographicsConfig, VideosetBlockConfig,
 } from "@/lib/types";
 
 type FlatPage =
   | { kind: "static"; page: BuilderPage }
   | { kind: "video"; page: BuilderPage; videoSet: RunnerVideoSet };
 
-// Response store: elementId → value (for non-video); or `${surveyVideoSetId}::${elementId}::${slot}` → value (for video)
 type ResponseMap = Record<string, string>;
 
 type SurveyProgress = { token: string; pageIndex: number; responses: ResponseMap };
 const storageKey = (slug: string) => `survey-progress-${slug}`;
+
+/** Splits a dynamic page's elements into three groups for the split layout. */
+function partitionVideoPageElements(elements: BuilderElement[]) {
+  const videoSetBlock = elements.find((e) => e.elementType === "videoset_block") ?? null;
+  const associated = elements.filter((e) => {
+    if (e.elementType !== "video_likert" && e.elementType !== "video_preference") return false;
+    const ref = (e.config as { videosetBlockRef?: string | null }).videosetBlockRef;
+    return !ref || ref === videoSetBlock?.id;
+  });
+  const associatedIds = new Set(associated.map((e) => e.id));
+  const nonAssociated = elements.filter(
+    (e) => e.id !== videoSetBlock?.id && !associatedIds.has(e.id)
+  );
+  return { videoSetBlock, associated, nonAssociated };
+}
 
 export default function SurveyRunner({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -41,6 +55,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Set<string>>(new Set());
   const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [carouselIndex, setCarouselIndex] = useState(0);
 
   // Step 1: restore from localStorage or create a new session
   useEffect(() => {
@@ -51,13 +66,12 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         setToken(progress.token);
         setPageIndex(progress.pageIndex);
         setResponses(progress.responses);
-        return; // Step 2 will load session data using the restored token
+        return;
       } catch {
         localStorage.removeItem(storageKey(slug));
       }
     }
 
-    // No stored progress — create a new session
     fetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,12 +88,11 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     }).catch(() => setError("Failed to load survey."));
   }, [slug]);
 
-  // Step 2: load session data from DB (also validates the token is still alive)
+  // Step 2: load session data from DB
   useEffect(() => {
     if (!token) return;
     fetch(`/api/sessions/${token}`).then(async (r) => {
       if (!r.ok) {
-        // Stale token (survey deleted, DB reset, etc.) — clear storage and restart
         localStorage.removeItem(storageKey(slug));
         setToken(null);
         setPageIndex(0);
@@ -114,17 +127,26 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
 
       const built = [...beforePages, ...videoPages, ...afterPages];
       setFlatPages(built);
-
-      // Clamp restored pageIndex in case the survey structure changed since last visit
       setPageIndex((prev) => Math.min(prev, Math.max(0, built.length - 1)));
     });
   }, [token]);
 
-  // Persist progress to localStorage on every change (except after final submit)
+  // Persist progress to localStorage on every change
   useEffect(() => {
     if (!token || done) return;
     localStorage.setItem(storageKey(slug), JSON.stringify({ token, pageIndex, responses }));
   }, [token, pageIndex, responses, done]);
+
+  // Reset carousel and scroll to top whenever the page changes
+  useEffect(() => {
+    setCarouselIndex(0);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [pageIndex]);
+
+  // Set browser title once template name is known
+  useEffect(() => {
+    if (session) document.title = session.survey.template.name;
+  }, [session]);
 
   function setResponse(key: string, val: string) {
     setResponses((prev) => ({ ...prev, [key]: val }));
@@ -139,21 +161,38 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     setResponse(elId, JSON.stringify({ ...current, [fieldId]: val }));
   }
 
+  // ─── Derived state (computed every render, before handlers) ─────────────────
+
   const currentFlat = flatPages[pageIndex];
   const progress = flatPages.length > 0 ? Math.round((pageIndex / flatPages.length) * 100) : 0;
 
-  // Returns the set of error keys for the current page (empty = all valid).
-  // Key format: el.id for static elements, surveyVideoSetId::el.id for video elements.
+  // videoSet and partition are computed unconditionally so handlers can close over them
+  const videoSet = currentFlat?.kind === "video" ? currentFlat.videoSet : undefined;
+  const { videoSetBlock, associated, nonAssociated } = videoSet && currentFlat
+    ? partitionVideoPageElements(currentFlat.page.elements)
+    : { videoSetBlock: null as BuilderElement | null, associated: [] as BuilderElement[], nonAssociated: [] as BuilderElement[] };
+
+  // Carousel mode: video page that has a videoset_block AND at least one associated question
+  const isCarouselMode = !!(videoSet && videoSetBlock && associated.length > 0);
+
+  // ─── Validation ─────────────────────────────────────────────────────────────
+
+  function showValidationErrors(errors: Set<string>) {
+    setValidationErrors(errors);
+    if (validationTimer.current) clearTimeout(validationTimer.current);
+    validationTimer.current = setTimeout(() => setValidationErrors(new Set()), 10000);
+  }
+
+  // Full-page validation (used by static pages and last carousel item)
   function getValidationErrors(): Set<string> {
     const errors = new Set<string>();
     if (!currentFlat) return errors;
-    const page = currentFlat.page;
-    const videoSet = currentFlat.kind === "video" ? currentFlat.videoSet : null;
+    const vs = currentFlat.kind === "video" ? currentFlat.videoSet : null;
 
-    for (const el of page.elements) {
+    for (const el of currentFlat.page.elements) {
       const type = el.elementType;
       if (type === "videoset_block") continue;
-      const key = videoSet ? `${videoSet.surveyVideoSetId}::${el.id}` : el.id;
+      const key = vs ? `${vs.surveyVideoSetId}::${el.id}` : el.id;
 
       if (type === "consent") {
         if (!responses[el.id]) errors.add(key);
@@ -161,34 +200,44 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         const c = el.config as DemographicsConfig;
         const vals = parseDemoValues(responses[el.id]);
         if (c.fields.some((f) => f.required && !vals[f.id])) errors.add(key);
-      } else if (type === "video_likert" && videoSet) {
-        if (videoSet.slots.some((s) => !responses[`${videoSet.surveyVideoSetId}::${el.id}::${s}`])) errors.add(key);
-      } else if (type === "video_preference" && videoSet) {
-        if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`]) errors.add(key);
+      } else if (type === "video_likert" && vs) {
+        if (vs.slots.some((s) => !responses[`${vs.surveyVideoSetId}::${el.id}::${s}`])) errors.add(key);
+      } else if (type === "video_preference" && vs) {
+        if (!responses[`${vs.surveyVideoSetId}::${el.id}::pref`]) errors.add(key);
       }
     }
     return errors;
   }
 
-  // Build the complete response payload from all accumulated responses across all pages
+  // Single-item validation for carousel intermediate steps
+  function validateCarouselItem(el: BuilderElement): Set<string> {
+    const errors = new Set<string>();
+    if (!videoSet) return errors;
+    const key = `${videoSet.surveyVideoSetId}::${el.id}`;
+    if (el.elementType === "video_likert") {
+      if (videoSet.slots.some((s) => !responses[`${videoSet.surveyVideoSetId}::${el.id}::${s}`])) errors.add(key);
+    } else if (el.elementType === "video_preference") {
+      if (!responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`]) errors.add(key);
+    }
+    return errors;
+  }
+
+  // ─── Page / carousel navigation ─────────────────────────────────────────────
+
   function buildAllResponses(): Array<{ surveyVideoSetId?: string; elementId: string; slotLabel?: string; value: string }> {
     const payload: Array<{ surveyVideoSetId?: string; elementId: string; slotLabel?: string; value: string }> = [];
-
     for (const flat of flatPages) {
-      const page = flat.page;
-      const videoSet = flat.kind === "video" ? flat.videoSet : null;
-
-      for (const el of page.elements) {
+      const vs = flat.kind === "video" ? flat.videoSet : null;
+      for (const el of flat.page.elements) {
         if (el.elementType === "videoset_block") continue;
-
-        if (el.elementType === "video_likert" && videoSet) {
-          for (const slot of videoSet.slots) {
-            const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::${slot}`];
-            if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: slot, value: val });
+        if (el.elementType === "video_likert" && vs) {
+          for (const slot of vs.slots) {
+            const val = responses[`${vs.surveyVideoSetId}::${el.id}::${slot}`];
+            if (val) payload.push({ surveyVideoSetId: vs.surveyVideoSetId, elementId: el.id, slotLabel: slot, value: val });
           }
-        } else if (el.elementType === "video_preference" && videoSet) {
-          const val = responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`];
-          if (val) payload.push({ surveyVideoSetId: videoSet.surveyVideoSetId, elementId: el.id, slotLabel: val, value: val });
+        } else if (el.elementType === "video_preference" && vs) {
+          const val = responses[`${vs.surveyVideoSetId}::${el.id}::pref`];
+          if (val) payload.push({ surveyVideoSetId: vs.surveyVideoSetId, elementId: el.id, slotLabel: val, value: val });
         } else {
           const val = responses[el.id];
           if (val) payload.push({ elementId: el.id, value: val });
@@ -198,30 +247,9 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     return payload;
   }
 
-  // Set browser title once template name is known
-  useEffect(() => {
-    if (session) document.title = session.survey.template.name;
-  }, [session]);
-
-  // Scroll to top whenever the page changes
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [pageIndex]);
-
-  async function next() {
-    const errors = getValidationErrors();
-    if (errors.size > 0) {
-      setValidationErrors(errors);
-      if (validationTimer.current) clearTimeout(validationTimer.current);
-      validationTimer.current = setTimeout(() => setValidationErrors(new Set()), 10000);
-      return;
-    }
-    // Clear any lingering errors on successful advance
-    setValidationErrors(new Set());
+  async function advancePage() {
     setSubmitting(true);
-
     if (pageIndex + 1 >= flatPages.length) {
-      // Final submit: POST all accumulated responses then mark session complete
       const payload = buildAllResponses();
       if (payload.length > 0) {
         await fetch("/api/responses", {
@@ -236,11 +264,58 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     } else {
       setPageIndex((i) => i + 1);
     }
-
     setSubmitting(false);
   }
 
-  function renderElement(el: BuilderElement, videoSet?: RunnerVideoSet) {
+  // Carousel Next: validate current item → advance; on last item validate full page → advance page
+  async function handleCarouselNext() {
+    if (!videoSet || !associated[carouselIndex]) return;
+
+    if (carouselIndex < associated.length - 1) {
+      const itemErrors = validateCarouselItem(associated[carouselIndex]);
+      if (itemErrors.size > 0) { showValidationErrors(itemErrors); return; }
+      setValidationErrors(new Set());
+      setCarouselIndex((i) => i + 1);
+    } else {
+      const allErrors = getValidationErrors();
+      if (allErrors.size > 0) {
+        showValidationErrors(allErrors);
+        // Jump to first errored associated item
+        const firstErrIdx = associated.findIndex(
+          (el) => allErrors.has(`${videoSet.surveyVideoSetId}::${el.id}`)
+        );
+        if (firstErrIdx >= 0) setCarouselIndex(firstErrIdx);
+        return;
+      }
+      setValidationErrors(new Set());
+      await advancePage();
+    }
+  }
+
+  // Carousel Back: go back in carousel, or back a page if at first question
+  function handleCarouselBack() {
+    setValidationErrors(new Set());
+    if (carouselIndex > 0) {
+      setCarouselIndex((i) => i - 1);
+    } else if (pageIndex > 0) {
+      setPageIndex((i) => i - 1);
+      // carouselIndex reset to 0 by the pageIndex useEffect, but for a "back" we want the last question
+      // We'll set it after the pageIndex state settles in the next render via a flag — simpler:
+      // just go to first question of previous page (reset is correct behavior for back)
+    }
+  }
+
+  // Static pages only
+  async function next() {
+    const errors = getValidationErrors();
+    if (errors.size > 0) { showValidationErrors(errors); return; }
+    setValidationErrors(new Set());
+    await advancePage();
+  }
+
+  // ─── Element renderer ───────────────────────────────────────────────────────
+
+  function renderElement(el: BuilderElement, vs?: RunnerVideoSet) {
     switch (el.elementType) {
       case "heading":
         return <HeadingEl config={el.config as HeadingConfig} />;
@@ -318,33 +393,46 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
         );
       }
       case "videoset_block":
-        return videoSet ? (
-          <video src={videoSet.compositeUrl} controls className="w-full rounded-lg" />
+        return vs ? (
+          <video src={vs.compositeUrl} controls className="w-full rounded-lg" />
         ) : null;
       case "video_likert":
-        return videoSet ? (
+        return vs ? (
           <VideoLikertEl
             config={el.config as VideoLikertConfig}
             elementId={el.id}
-            slots={videoSet.slots}
-            surveyVideoSetId={videoSet.surveyVideoSetId}
-            values={Object.fromEntries(videoSet.slots.map((s) => [s, responses[`${videoSet.surveyVideoSetId}::${el.id}::${s}`] ?? ""]))}
-            onChange={(slot, val) => setResponse(`${videoSet.surveyVideoSetId}::${el.id}::${slot}`, val)}
+            slots={vs.slots}
+            surveyVideoSetId={vs.surveyVideoSetId}
+            values={Object.fromEntries(vs.slots.map((s) => [s, responses[`${vs.surveyVideoSetId}::${el.id}::${s}`] ?? ""]))}
+            onChange={(slot, val) => setResponse(`${vs.surveyVideoSetId}::${el.id}::${slot}`, val)}
           />
         ) : null;
       case "video_preference":
-        return videoSet ? (
+        return vs ? (
           <VideoPreferenceEl
             config={el.config as VideoPreferenceConfig}
-            slots={videoSet.slots}
-            value={responses[`${videoSet.surveyVideoSetId}::${el.id}::pref`] ?? ""}
-            onChange={(val) => setResponse(`${videoSet.surveyVideoSetId}::${el.id}::pref`, val)}
+            slots={vs.slots}
+            value={responses[`${vs.surveyVideoSetId}::${el.id}::pref`] ?? ""}
+            onChange={(val) => setResponse(`${vs.surveyVideoSetId}::${el.id}::pref`, val)}
           />
         ) : null;
       default:
         return null;
     }
   }
+
+  function renderWithError(el: BuilderElement, vs?: RunnerVideoSet) {
+    const errKey = vs ? `${vs.surveyVideoSetId}::${el.id}` : el.id;
+    const hasError = validationErrors.has(errKey);
+    return (
+      <div key={el.id} className={hasError ? "rounded-lg ring-2 ring-red-400 p-3 -mx-3" : ""}>
+        {renderElement(el, vs)}
+        {hasError && <p className="text-xs text-red-500 mt-2">Required field</p>}
+      </div>
+    );
+  }
+
+  // ─── Early returns ───────────────────────────────────────────────────────────
 
   if (error) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -367,12 +455,20 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
     </div>
   );
 
-  const videoSet = currentFlat?.kind === "video" ? currentFlat.videoSet : undefined;
+  // ─── Display-layer derivations (after early returns) ────────────────────────
+
   const totalVideoSets = session.survey.videoSets.length;
+  const containerWidth = (videoSetBlock?.config as VideosetBlockConfig | undefined)?.containerWidth ?? "100%";
+  const maxWidth = isCarouselMode ? "max-w-6xl" : "max-w-3xl";
+
+  const isLastQuestion = carouselIndex === associated.length - 1;
+  const isLastPage = pageIndex + 1 === flatPages.length;
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-zinc-50">
-      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+      <div className={`${maxWidth} mx-auto px-4 py-8 space-y-6`}>
         <h1 className="text-2xl font-bold text-zinc-900 text-center">
           {session.survey.template.name}
         </h1>
@@ -381,6 +477,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
 
         <Card>
           <CardContent className="py-8 px-8 space-y-8">
+            {/* Video set progress indicator */}
             {videoSet && totalVideoSets > 1 && (
               <div className="flex items-center justify-between border-b border-zinc-100 pb-4 -mt-2">
                 <span className="text-sm font-medium text-zinc-500">
@@ -394,39 +491,82 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
                 </div>
               </div>
             )}
-            {currentFlat?.page.elements.map((el) => {
-              const errKey = videoSet ? `${videoSet.surveyVideoSetId}::${el.id}` : el.id;
-              const hasError = validationErrors.has(errKey);
-              return (
-                <div key={el.id}
-                  className={hasError ? "rounded-lg ring-2 ring-red-400 p-3 -mx-3" : ""}>
-                  {renderElement(el, videoSet)}
-                  {hasError && (
-                    <p className="text-xs text-red-500 mt-2">Required field</p>
-                  )}
+
+            {isCarouselMode ? (
+              <>
+                {/* Non-associated blocks (headings, textboxes, etc.) — full width above split */}
+                {nonAssociated.map((el) => renderWithError(el, videoSet))}
+
+                {/* Split layout: video left (45%), questions right (55%) */}
+                <div className="grid grid-cols-1 lg:grid-cols-[9fr_11fr] gap-8 items-start">
+                  {/* Left panel: composite video, sticky */}
+                  <div className="lg:sticky lg:top-6">
+                    <div style={{ maxWidth: containerWidth }} className="mx-auto">
+                      <video
+                        key={videoSet!.compositeUrl}
+                        src={videoSet!.compositeUrl}
+                        controls
+                        className="w-full rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right panel: one question at a time + carousel nav */}
+                  <div className="flex flex-col gap-6">
+                    <div className="min-h-[200px]">
+                      {renderWithError(associated[carouselIndex], videoSet)}
+                    </div>
+
+                    {/* Carousel navigation — sole nav for video pages */}
+                    <div className="grid grid-cols-3 items-center border-t border-zinc-100 pt-4">
+                      <div>
+                        <Button
+                          variant="ghost"
+                          onClick={handleCarouselBack}
+                          disabled={carouselIndex === 0 && pageIndex === 0}
+                        >
+                          ← Back
+                        </Button>
+                      </div>
+                      <span className="text-xs text-zinc-400 text-center">
+                        {associated.length > 1 && `Question ${carouselIndex + 1}/${associated.length}`}
+                      </span>
+                      <div className="flex justify-end">
+                        <Button onClick={handleCarouselNext} disabled={submitting} size="lg">
+                          {submitting ? "Saving…" : isLastQuestion && isLastPage ? "Submit" : "Next →"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              );
-            })}
+              </>
+            ) : (
+              /* Static pages and video pages without carousel — unchanged sequential render */
+              currentFlat?.page.elements.map((el) => renderWithError(el, videoSet))
+            )}
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-3 items-center">
-          <div>
-            {pageIndex > 0 && (
-              <Button variant="ghost" onClick={() => setPageIndex((i) => i - 1)} disabled={submitting}>
-                ← Back
+        {/* Footer nav — only shown on non-carousel pages */}
+        {!isCarouselMode && (
+          <div className="grid grid-cols-3 items-center">
+            <div>
+              {pageIndex > 0 && (
+                <Button variant="ghost" onClick={() => setPageIndex((i) => i - 1)} disabled={submitting}>
+                  ← Back
+                </Button>
+              )}
+            </div>
+            <span className="text-sm text-zinc-400 text-center">
+              Page {pageIndex + 1} of {flatPages.length}
+            </span>
+            <div className="flex justify-end">
+              <Button onClick={next} disabled={submitting} size="lg">
+                {submitting ? "Saving…" : isLastPage ? "Submit" : "Next →"}
               </Button>
-            )}
+            </div>
           </div>
-          <span className="text-sm text-zinc-400 text-center">
-            Page {pageIndex + 1} of {flatPages.length}
-          </span>
-          <div className="flex justify-end">
-            <Button onClick={next} disabled={submitting} size="lg">
-              {submitting ? "Saving…" : pageIndex + 1 === flatPages.length ? "Submit" : "Next →"}
-            </Button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -275,6 +275,28 @@ export default function ElementEditor({ element, onChange, videosetBlocks = [] }
             <Input value={c.name ?? ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g. Video Set Block" />
           </div>
           <div className="space-y-2">
+            <Label>Layout mode</Label>
+            <div className="flex gap-1">
+              {(["carousel", "scroll"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => patch({ layoutMode: mode })}
+                  className={`flex-1 py-1.5 text-xs rounded border transition-colors capitalize
+                    ${(c.layoutMode ?? "carousel") === mode
+                      ? "bg-zinc-900 text-white border-zinc-900"
+                      : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              {(c.layoutMode ?? "carousel") === "carousel"
+                ? "One question at a time — respondent steps through with Next."
+                : "All questions visible — respondent scrolls and submits at once."}
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label>
               Container width <span className="text-zinc-400 font-normal">(within video panel)</span>
             </Label>

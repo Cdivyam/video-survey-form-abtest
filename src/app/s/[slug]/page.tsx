@@ -2,7 +2,6 @@
 import { useEffect, useRef, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
 import HeadingEl from "@/components/runner/elements/HeadingEl";
 import TextboxEl from "@/components/runner/elements/TextboxEl";
@@ -56,6 +55,8 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   const [validationErrors, setValidationErrors] = useState<Set<string>>(new Set());
   const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [isVideoStuck, setIsVideoStuck] = useState(false);
+  const videoSentinelRef = useRef<HTMLDivElement>(null);
 
   // Step 1: restore from localStorage or create a new session
   useEffect(() => {
@@ -140,8 +141,25 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   // Reset carousel and scroll to top whenever the page changes
   useEffect(() => {
     setCarouselIndex(0);
+    setIsVideoStuck(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [pageIndex]);
+
+  // Scroll mode: observe sentinel to detect when video has left its natural position
+  useEffect(() => {
+    if (!videoSentinelRef.current) return;
+    const flat = flatPages[pageIndex];
+    if (flat?.kind !== "video") return;
+    const vsb = flat.page.elements.find((e) => e.elementType === "videoset_block");
+    const mode = (vsb?.config as VideosetBlockConfig | undefined)?.layoutMode ?? "carousel";
+    if (mode !== "scroll") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsVideoStuck(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(videoSentinelRef.current);
+    return () => observer.disconnect();
+  }, [flatPages, pageIndex]);
 
   // Set browser title once template name is known
   useEffect(() => {
@@ -164,16 +182,18 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
   // ─── Derived state (computed every render, before handlers) ─────────────────
 
   const currentFlat = flatPages[pageIndex];
-  const progress = flatPages.length > 0 ? Math.round((pageIndex / flatPages.length) * 100) : 0;
-
   // videoSet and partition are computed unconditionally so handlers can close over them
   const videoSet = currentFlat?.kind === "video" ? currentFlat.videoSet : undefined;
   const { videoSetBlock, associated, nonAssociated } = videoSet && currentFlat
     ? partitionVideoPageElements(currentFlat.page.elements)
     : { videoSetBlock: null as BuilderElement | null, associated: [] as BuilderElement[], nonAssociated: [] as BuilderElement[] };
 
-  // Carousel mode: video page that has a videoset_block AND at least one associated question
-  const isCarouselMode = !!(videoSet && videoSetBlock && associated.length > 0);
+  const layoutMode = (videoSetBlock?.config as VideosetBlockConfig | undefined)?.layoutMode ?? "carousel";
+
+  // Carousel mode: video page with associated questions presented one at a time
+  const isCarouselMode = !!(videoSet && videoSetBlock && associated.length > 0 && layoutMode === "carousel");
+  // Scroll mode: video page with associated questions all visible, validated as a whole page
+  const isScrollMode   = !!(videoSet && videoSetBlock && associated.length > 0 && layoutMode === "scroll");
 
   // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -459,7 +479,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
 
   const totalVideoSets = session.survey.videoSets.length;
   const containerWidth = (videoSetBlock?.config as VideosetBlockConfig | undefined)?.containerWidth ?? "100%";
-  const maxWidth = isCarouselMode ? "max-w-6xl" : "max-w-3xl";
+  const maxWidth = (isCarouselMode || isScrollMode) ? "max-w-6xl" : "max-w-3xl";
 
   const isLastQuestion = carouselIndex === associated.length - 1;
   const isLastPage = pageIndex + 1 === flatPages.length;
@@ -473,9 +493,7 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
           {session.survey.template.name}
         </h1>
 
-        <Progress value={progress} className="h-1.5" />
-
-        <Card>
+        <Card className={(isCarouselMode || isScrollMode) ? "overflow-visible" : ""}>
           <CardContent className="py-8 px-8 space-y-8">
             {/* Video set progress indicator */}
             {videoSet && totalVideoSets > 1 && (
@@ -540,14 +558,52 @@ export default function SurveyRunner({ params }: { params: Promise<{ slug: strin
                   </div>
                 </div>
               </>
+            ) : isScrollMode ? (
+              <>
+                {/* Non-associated blocks — full width above split */}
+                {nonAssociated.map((el) => renderWithError(el, videoSet))}
+
+                {/* Sentinel — 1px div at top of grid; scrolling past it means video is now stuck */}
+                <div ref={videoSentinelRef} className="h-px" />
+
+                {/* Split layout: video left (45%), all questions right (55%) */}
+                <div className="grid grid-cols-1 lg:grid-cols-[9fr_11fr] gap-8 items-start">
+                  {/* Left panel: composite video, sticky with elevation when stuck */}
+                  <div className="lg:sticky lg:top-6">
+                    <div
+                      style={{ maxWidth: containerWidth }}
+                      className={`mx-auto transition-all duration-300 ${
+                        isVideoStuck ? "rounded-xl shadow-xl ring-1 ring-black/10" : ""
+                      }`}
+                    >
+                      <video
+                        key={videoSet!.compositeUrl}
+                        src={videoSet!.compositeUrl}
+                        controls
+                        className="w-full rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right panel: all questions visible, scrollable */}
+                  <div className="flex flex-col">
+                    {associated.map((el, idx) => (
+                      <div key={el.id}>
+                        {idx > 0 && <div className="border-t border-zinc-100 my-6" />}
+                        {renderWithError(el, videoSet)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
             ) : (
-              /* Static pages and video pages without carousel — unchanged sequential render */
+              /* Static pages — unchanged sequential render */
               currentFlat?.page.elements.map((el) => renderWithError(el, videoSet))
             )}
           </CardContent>
         </Card>
 
-        {/* Footer nav — only shown on non-carousel pages */}
+        {/* Footer nav — shown on static and scroll pages; carousel has its own inline nav */}
         {!isCarouselMode && (
           <div className="grid grid-cols-3 items-center">
             <div>

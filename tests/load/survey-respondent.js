@@ -14,11 +14,18 @@ import { Trend, Rate } from "k6/metrics";
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const BASE_URL = __ENV.BASE_URL || "http://localhost:3000";
-const SURVEY_SLUG = __ENV.SURVEY_SLUG || "";
 
-if (!SURVEY_SLUG) {
-  throw new Error("SURVEY_SLUG env var is required. See tests/load/README.md");
+// Single slug or comma-separated list: SURVEY_SLUGS=slug1,slug2,slug3
+const SURVEY_SLUGS = (__ENV.SURVEY_SLUGS || __ENV.SURVEY_SLUG || "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+const USERS_PER_SURVEY = parseInt(__ENV.USERS_PER_SURVEY || "6", 10);
+
+if (SURVEY_SLUGS.length === 0) {
+  throw new Error("SURVEY_SLUG or SURVEY_SLUGS env var is required. See tests/load/README.md");
 }
+
+const totalVUs = SURVEY_SLUGS.length * USERS_PER_SURVEY;
 
 // ─── Custom metrics ───────────────────────────────────────────────────────────
 
@@ -32,9 +39,9 @@ const errorRate             = new Rate("errors");
 
 export const options = {
   stages: [
-    { duration: "30s", target: 10 },  // ramp up to 10 concurrent users
-    { duration: "1m",  target: 30 },  // ramp to 30 and hold
-    { duration: "30s", target: 0  },  // ramp down
+    { duration: "30s", target: Math.ceil(totalVUs / 2) },  // ramp to half
+    { duration: "1m",  target: totalVUs },                  // ramp to full and hold
+    { duration: "30s", target: 0 },                         // ramp down
   ],
   thresholds: {
     // 95% of all requests complete within 3s
@@ -52,6 +59,9 @@ export const options = {
 // ─── Main scenario ───────────────────────────────────────────────────────────
 
 export default function () {
+  // Each VU is pinned to one survey for the duration of the test
+  const slug = SURVEY_SLUGS[(__VU - 1) % SURVEY_SLUGS.length];
+
   let token = null;
   let videoSets = [];
   let pages = [];
@@ -60,7 +70,7 @@ export default function () {
   group("create_session", () => {
     const res = http.post(
       `${BASE_URL}/api/sessions`,
-      JSON.stringify({ slug: SURVEY_SLUG }),
+      JSON.stringify({ slug }),
       { headers: { "Content-Type": "application/json" } }
     );
 

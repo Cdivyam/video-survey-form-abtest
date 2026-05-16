@@ -35,7 +35,7 @@ sudo apt-get update && sudo apt-get install k6
 
 ## Running the test
 
-### Against the production server
+### Single survey
 ```bash
 k6 run \
   -e BASE_URL=https://your-domain.com \
@@ -43,12 +43,22 @@ k6 run \
   tests/load/survey-respondent.js
 ```
 
+### Multiple surveys (e.g. 3 surveys × 6 users each = 18 total)
+```bash
+k6 run \
+  -e BASE_URL=https://your-domain.com \
+  -e SURVEY_SLUGS=slug1,slug2,slug3 \
+  -e USERS_PER_SURVEY=6 \
+  tests/load/survey-respondent.js
+```
+
+Virtual users are distributed evenly — VU 1, 4, 7… → slug1; VU 2, 5, 8… → slug2; etc.
+`USERS_PER_SURVEY` defaults to 6 if omitted.
+
 ### Against a local dev server
 ```bash
-# Terminal 1: start the app
-npm run dev
+npm run dev   # Terminal 1
 
-# Terminal 2: run the test
 k6 run \
   -e BASE_URL=http://localhost:3000 \
   -e SURVEY_SLUG=your-survey-slug \
